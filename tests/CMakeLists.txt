@@ -9,8 +9,16 @@ set(DOCTEST_NO_INSTALL ON)
 FetchContent_MakeAvailable(doctest)
 
 file(GLOB_RECURSE lexec_test_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+list(FILTER lexec_test_sources EXCLUDE REGEX "/asm/")
+if(LEXEC_SANITIZERS)
+    # Sanitizer runtimes define the global allocation functions the counter replaces.
+    list(FILTER lexec_test_sources EXCLUDE REGEX "/allocation_(counter|test)\\.cpp$")
+endif()
 add_executable(lexec_tests ${lexec_test_sources})
 target_link_libraries(lexec_tests PRIVATE lexec::lexec lexec_dev doctest::doctest)
+# Defining this with exceptions enabled would switch doctest's exception assertions off.
+target_compile_definitions(lexec_tests PRIVATE
+    $<$<BOOL:${LEXEC_DISABLE_EXCEPTIONS}>:DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS>)
 add_test(NAME lexec_tests COMMAND ${LEXEC_TEST_LAUNCHER} $<TARGET_FILE:lexec_tests>)
 
 file(GLOB_RECURSE lexec_public_headers CONFIGURE_DEPENDS
@@ -25,3 +33,15 @@ foreach(header IN LISTS lexec_public_headers)
 endforeach()
 add_library(lexec_header_check OBJECT ${lexec_header_check_sources})
 target_link_libraries(lexec_header_check PRIVATE lexec::lexec lexec_dev)
+
+# Optimized regardless of build type and free of sanitizer instrumentation, so the
+# disassembly reflects what users get.
+add_library(lexec_zero_overhead_probe OBJECT asm/zero_overhead_probe.cpp)
+target_link_libraries(lexec_zero_overhead_probe PRIVATE lexec::lexec)
+target_compile_options(lexec_zero_overhead_probe PRIVATE -O2)
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND AND CMAKE_OBJDUMP)
+    add_test(NAME lexec_zero_overhead_codegen
+        COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/asm/compare_functions.py" "${CMAKE_OBJDUMP}"
+            $<TARGET_OBJECTS:lexec_zero_overhead_probe> lexec_probe_direct lexec_probe_framework lexec_probe_reference)
+endif()

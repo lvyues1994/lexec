@@ -29,7 +29,7 @@ C++17 是这个模型能成立的最低标准，因为有**保证拷贝消除**�
 - **没有 `std::stop_token`**：自行实现 `inplace_stop_source/token/callback` 和 `never_stop_token`。
 - **没有 consteval 和 constexpr 异常**：completion signatures 在类型层面用 `decltype` 计算。
 - **没有协程**：核心库不含 `task` / `as_awaitable`，将来可提供仅在 C++20 下启用的可选头文件。
-- **`[[no_unique_address]]` 是 C++20 特性**：GCC 和 Clang 在 C++17 模式下作为扩展支持，统一封装为 `LEXEC_NO_UNIQUE_ADDRESS`。
+- **`[[no_unique_address]]` 是 C++20 特性**：GCC 和 Clang 在 C++17 模式下作为扩展支持，统一封装为 `LEXEC_NO_UNIQUE_ADDRESS`。Clang 18 在嵌套聚合初始化含这种空成员的类型时会崩溃，所以 `detail::tuple` 对空元素改用空基类优化，只有通过构造函数初始化的成员才使用这个宏。
 
 ## 分层架构
 
@@ -112,7 +112,8 @@ struct then_op {
         void set_value(Vs &&...vs) && noexcept {
             op->complete(static_cast<Vs &&>(vs)...);
         }
-        auto get_env() const noexcept { return lexec::get_env(op->rcvr); }
+        // 返回类型必须显式写出：推导它需要 then_op 完整，而此时 then_op 尚未定义完。
+        auto get_env() const noexcept -> env_of_t<Rcvr> { return lexec::get_env(op->rcvr); }
     };
 
     explicit then_op(Child &&child_, Fn &&fn_, Rcvr &&rcvr_)
@@ -153,11 +154,16 @@ struct then_op {
 ## 与 stdexec 的关系
 
 - **借鉴**：成员函数定制点、`__sexpr` 式的钩子描述、completion signatures 变换工具、`inplace_stop_token` 的实现、侵入式 `run_loop`。
-- **规避**：编译时间问题。从阶段 1 起记录测试翻译单元的编译耗时。手段包括：
+- **规避**：编译时间问题。从阶段 1 起记录编译耗时，数据见 `docs/baselines.md`。手段包括：
   - 用 `static_cast<T&&>` 代替 `std::forward`；
   - 基于别名的元函数；
   - 编译器内建（`__type_pack_element`、`__make_integer_seq`）；
   - 减少 SFINAE 层数。
+
+与标准的已知差异：
+
+- `sync_wait` 位于 `lexec::sync_wait`，标准中是 `std::this_thread::sync_wait`。
+- `then` / `upon_error` / `upon_stopped` 直接调用函数对象，暂不支持成员指针；标准使用 `std::invoke`。
 
 ## 命名与风格
 
@@ -171,14 +177,15 @@ lexec/
   cmake/         仅用于自身开发构建的选项
   include/lexec/
     execution.hpp  stop_token.hpp
-    detail/      config.hpp meta.hpp tuple.hpp manual_lifetime.hpp
-    core/        tags.hpp concepts.hpp env.hpp queries.hpp completion_signatures.hpp
-    framework/   basic_sender.hpp adaptor_closure.hpp transform_sender.hpp
-    algorithms/  just.hpp then.hpp let.hpp when_all.hpp continues_on.hpp bulk.hpp sync_wait.hpp ...
-    schedulers/  inline_scheduler.hpp run_loop.hpp static_thread_pool.hpp
+    detail/      config.hpp meta.hpp tuple.hpp spin_wait.hpp manual_lifetime.hpp
+    core/        completion_tags.hpp completion_signatures.hpp env.hpp queries.hpp
+                 receiver.hpp operation_state.hpp sender.hpp sender_traits.hpp scheduler.hpp
+    framework/   basic_sender.hpp sender_adaptor_closure.hpp transform_sender.hpp
+    algorithms/  just.hpp then.hpp sync_wait.hpp let.hpp when_all.hpp continues_on.hpp bulk.hpp ...
+    schedulers/  run_loop.hpp inline_scheduler.hpp static_thread_pool.hpp
   src/           static_thread_pool.cpp
-  tests/         按层组织，含 static_assert 编译期测试和头文件自包含检查
-  bench/         另含一个 C++20 目标，用于和 stdexec 对比
+  tests/         按层组织，含 static_assert 编译期测试、头文件自包含检查和 -O2 汇编比对
+  bench/         编译时间探针；之后另含一个 C++20 目标，用于和 stdexec 对比
   examples/
 ```
 
@@ -210,7 +217,7 @@ lexec/
 
 **阶段 2：单线程算法与定制**
 
-- 内容：`let_*`、`read_env`、`write_env`、`into_variant`、`stopped_as_optional/error`、`unstoppable`、`transform_sender` 与 domain。
+- 内容：`let_*`（连同它需要的 `detail/manual_lifetime`）、`read_env`、`write_env`、`into_variant`、`stopped_as_optional/error`、`unstoppable`、`transform_sender` 与 domain（含 `get_domain` 查询）。
 - 验收：每个算法的值、错误、停止三个通道测试；noexcept 传播测试；只能移动的类型的测试。
 
 **阶段 3：并发**
