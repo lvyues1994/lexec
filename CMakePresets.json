@@ -1,0 +1,203 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "LEXEC_BUILD_TESTS": true
+      }
+    },
+    {
+      "name": "gcc",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "clang",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "debug",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "asan",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "LEXEC_SANITIZERS": "address,undefined"
+      }
+    },
+    {
+      "name": "tsan",
+      "hidden": true,
+      "inherits": "base",
+      "description": "Tests run with ASLR disabled: GCC's TSan runtime aborts on kernels with high-entropy mmap randomization",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "LEXEC_SANITIZERS": "thread",
+        "LEXEC_TEST_LAUNCHER": "setarch;-R"
+      }
+    },
+    {
+      "name": "noexcept",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "LEXEC_DISABLE_EXCEPTIONS": true
+      }
+    },
+    { "name": "gcc-debug", "inherits": ["gcc", "debug"] },
+    { "name": "gcc-release", "inherits": ["gcc", "release"] },
+    { "name": "gcc-asan", "inherits": ["gcc", "asan"] },
+    { "name": "gcc-tsan", "inherits": ["gcc", "tsan"] },
+    { "name": "gcc-noexcept", "inherits": ["gcc", "noexcept"] },
+    { "name": "clang-debug", "inherits": ["clang", "debug"] },
+    { "name": "clang-release", "inherits": ["clang", "release"] },
+    { "name": "clang-asan", "inherits": ["clang", "asan"] },
+    { "name": "clang-tsan", "inherits": ["clang", "tsan"] },
+    { "name": "clang-noexcept", "inherits": ["clang", "noexcept"] }
+  ],
+  "buildPresets": [
+    { "name": "gcc-debug", "configurePreset": "gcc-debug" },
+    { "name": "gcc-release", "configurePreset": "gcc-release" },
+    { "name": "gcc-asan", "configurePreset": "gcc-asan" },
+    { "name": "gcc-tsan", "configurePreset": "gcc-tsan" },
+    { "name": "gcc-noexcept", "configurePreset": "gcc-noexcept" },
+    { "name": "clang-debug", "configurePreset": "clang-debug" },
+    { "name": "clang-release", "configurePreset": "clang-release" },
+    { "name": "clang-asan", "configurePreset": "clang-asan" },
+    { "name": "clang-tsan", "configurePreset": "clang-tsan" },
+    { "name": "clang-noexcept", "configurePreset": "clang-noexcept" }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "environment": {
+        "UBSAN_OPTIONS": "print_stacktrace=1"
+      }
+    },
+    { "name": "gcc-debug", "inherits": "test-base", "configurePreset": "gcc-debug" },
+    { "name": "gcc-release", "inherits": "test-base", "configurePreset": "gcc-release" },
+    { "name": "gcc-asan", "inherits": "test-base", "configurePreset": "gcc-asan" },
+    { "name": "gcc-tsan", "inherits": "test-base", "configurePreset": "gcc-tsan" },
+    { "name": "gcc-noexcept", "inherits": "test-base", "configurePreset": "gcc-noexcept" },
+    { "name": "clang-debug", "inherits": "test-base", "configurePreset": "clang-debug" },
+    { "name": "clang-release", "inherits": "test-base", "configurePreset": "clang-release" },
+    { "name": "clang-asan", "inherits": "test-base", "configurePreset": "clang-asan" },
+    { "name": "clang-tsan", "inherits": "test-base", "configurePreset": "clang-tsan" },
+    { "name": "clang-noexcept", "inherits": "test-base", "configurePreset": "clang-noexcept" }
+  ],
+  "workflowPresets": [
+    {
+      "name": "gcc-debug",
+      "steps": [
+        { "type": "configure", "name": "gcc-debug" },
+        { "type": "build", "name": "gcc-debug" },
+        { "type": "test", "name": "gcc-debug" }
+      ]
+    },
+    {
+      "name": "gcc-release",
+      "steps": [
+        { "type": "configure", "name": "gcc-release" },
+        { "type": "build", "name": "gcc-release" },
+        { "type": "test", "name": "gcc-release" }
+      ]
+    },
+    {
+      "name": "gcc-asan",
+      "steps": [
+        { "type": "configure", "name": "gcc-asan" },
+        { "type": "build", "name": "gcc-asan" },
+        { "type": "test", "name": "gcc-asan" }
+      ]
+    },
+    {
+      "name": "gcc-tsan",
+      "steps": [
+        { "type": "configure", "name": "gcc-tsan" },
+        { "type": "build", "name": "gcc-tsan" },
+        { "type": "test", "name": "gcc-tsan" }
+      ]
+    },
+    {
+      "name": "gcc-noexcept",
+      "steps": [
+        { "type": "configure", "name": "gcc-noexcept" },
+        { "type": "build", "name": "gcc-noexcept" },
+        { "type": "test", "name": "gcc-noexcept" }
+      ]
+    },
+    {
+      "name": "clang-debug",
+      "steps": [
+        { "type": "configure", "name": "clang-debug" },
+        { "type": "build", "name": "clang-debug" },
+        { "type": "test", "name": "clang-debug" }
+      ]
+    },
+    {
+      "name": "clang-release",
+      "steps": [
+        { "type": "configure", "name": "clang-release" },
+        { "type": "build", "name": "clang-release" },
+        { "type": "test", "name": "clang-release" }
+      ]
+    },
+    {
+      "name": "clang-asan",
+      "steps": [
+        { "type": "configure", "name": "clang-asan" },
+        { "type": "build", "name": "clang-asan" },
+        { "type": "test", "name": "clang-asan" }
+      ]
+    },
+    {
+      "name": "clang-tsan",
+      "steps": [
+        { "type": "configure", "name": "clang-tsan" },
+        { "type": "build", "name": "clang-tsan" },
+        { "type": "test", "name": "clang-tsan" }
+      ]
+    },
+    {
+      "name": "clang-noexcept",
+      "steps": [
+        { "type": "configure", "name": "clang-noexcept" },
+        { "type": "build", "name": "clang-noexcept" },
+        { "type": "test", "name": "clang-noexcept" }
+      ]
+    }
+  ]
+}
