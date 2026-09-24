@@ -61,21 +61,28 @@ prop(Query, Value) -> prop<Query, Value>;
 
 namespace detail {
 
-template <class Query, class... Envs>
-constexpr std::size_t first_env_with_query() noexcept {
-    constexpr bool found[] = {has_query_v<Envs const &, Query>..., true};
-    auto index = std::size_t{0};
-    while (not found[index]) {
-        ++index;
+template <class Query, class ArgList, class... Envs>
+struct first_env_with_query;
+
+template <class Query, class... Args, class... Envs>
+struct first_env_with_query<Query, type_list<Args...>, Envs...> {
+    static constexpr std::size_t find() noexcept {
+        constexpr bool found[] = {has_query_v<Envs const &, Query, Args...>..., true};
+        auto index = std::size_t{0};
+        while (not found[index]) {
+            ++index;
+        }
+        return index;
     }
-    return index;
-}
 
-template <class Query, class... Envs>
-inline constexpr std::size_t first_env_with_query_v = first_env_with_query<Query, Envs...>();
+    static constexpr std::size_t value = find();
+};
 
-template <class Query, class... Envs>
-using enable_env_query_t = std::enable_if_t<(first_env_with_query_v<Query, Envs...> < sizeof...(Envs))>;
+template <class Query, class ArgList, class... Envs>
+inline constexpr std::size_t first_env_with_query_v = first_env_with_query<Query, ArgList, Envs...>::value;
+
+template <class Query, class ArgList, class... Envs>
+using enable_env_query_t = std::enable_if_t<(first_env_with_query_v<Query, ArgList, Envs...> < sizeof...(Envs))>;
 
 } // namespace detail
 
@@ -85,9 +92,10 @@ struct env {
     constexpr explicit env(Envs... envs_) noexcept((std::is_nothrow_move_constructible_v<Envs> and ...))
         : envs{{static_cast<Envs &&>(envs_)}...} {}
 
-    template <class Query, class = detail::enable_env_query_t<Query, Envs...>>
-    constexpr decltype(auto) query(Query query_tag) const noexcept {
-        return detail::get<detail::first_env_with_query_v<Query, Envs...>>(envs).query(query_tag);
+    template <class Query, class... Args, class = detail::enable_env_query_t<Query, detail::type_list<Args...>, Envs...>>
+    constexpr decltype(auto) query(Query query_tag, Args &&...args) const noexcept {
+        constexpr auto index = detail::first_env_with_query_v<Query, detail::type_list<Args...>, Envs...>;
+        return detail::get<index>(envs).query(query_tag, static_cast<Args &&>(args)...);
     }
 
     detail::tuple<Envs...> envs;
@@ -154,6 +162,17 @@ template <class Env>
 constexpr fwd_env_t<Env> make_fwd_env(Env &&base) noexcept {
     return fwd_env_t<Env>{static_cast<Env &&>(base)};
 }
+
+// Answers every query of an environment that outlives it, without copying it.
+template <class Env>
+struct env_ref {
+    template <class Query, class... Args, class = std::enable_if_t<has_query_v<Env const &, Query, Args...>>>
+    constexpr decltype(auto) query(Query query_tag, Args &&...args) const noexcept {
+        return target->query(query_tag, static_cast<Args &&>(args)...);
+    }
+
+    Env const *target;
+};
 
 } // namespace detail
 

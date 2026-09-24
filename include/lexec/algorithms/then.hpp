@@ -119,26 +119,11 @@ struct impls_for<upon_error_t> : then_impls<set_error_t> {};
 template <>
 struct impls_for<upon_stopped_t> : then_impls<set_stopped_t> {};
 
-// `Tag{}(sndr, fn)` builds the sender; `Tag{}(fn)` builds a closure for `sndr | Tag{}(fn)`.
-template <class Tag>
-struct then_like {
-    template <class Sndr, class Fn, std::enable_if_t<is_sender_v<Sndr>, int> = 0>
-    constexpr auto operator()(Sndr &&sndr, Fn &&fn) const
-        -> basic_sender<Tag, std::decay_t<Fn>, std::decay_t<Sndr>> {
-        return {static_cast<Fn &&>(fn), {{static_cast<Sndr &&>(sndr)}}};
-    }
-
-    template <class Fn>
-    constexpr auto operator()(Fn &&fn) const -> partial_closure<Tag, std::decay_t<Fn>> {
-        return make_partial_closure<Tag>(static_cast<Fn &&>(fn));
-    }
-};
-
 } // namespace detail
 
-struct then_t : detail::then_like<then_t> {};
-struct upon_error_t : detail::then_like<upon_error_t> {};
-struct upon_stopped_t : detail::then_like<upon_stopped_t> {};
+struct then_t : detail::data_adaptor<then_t> {};
+struct upon_error_t : detail::data_adaptor<upon_error_t> {};
+struct upon_stopped_t : detail::data_adaptor<upon_stopped_t> {};
 
 inline constexpr then_t then{};
 inline constexpr upon_error_t upon_error{};

@@ -2,6 +2,7 @@
 
 #include <lexec/core/completion_signatures.hpp>
 #include <lexec/core/completion_tags.hpp>
+#include <lexec/core/domain.hpp>
 #include <lexec/core/env.hpp>
 #include <lexec/core/operation_state.hpp>
 #include <lexec/core/receiver.hpp>
@@ -22,8 +23,8 @@ namespace lexec::detail {
 template <class Tag>
 struct impls_for;
 
-template <class Sndr>
-using tag_of_t = typename remove_cvref_t<Sndr>::tag_type;
+// The data of an algorithm that stores nothing besides its children.
+struct no_data {};
 
 template <class Sndr>
 using data_of_t = typename remove_cvref_t<Sndr>::data_type;
@@ -37,6 +38,10 @@ template <class Sndr, std::size_t I, class... Env>
 using child_completions_t = completion_signatures_of_t<child_of_t<Sndr, I>, fwd_env_t<Env>...>;
 
 struct default_impls {
+    // An algorithm that connects its children itself, inside its state, sets this to
+    // false; the framework then connects none of them.
+    static constexpr bool connects_children = true;
+
     template <class Data, class... Child>
     static constexpr auto get_attrs(Data const &, Child const &...child) noexcept {
         if constexpr (sizeof...(Child) == 1) {
@@ -74,12 +79,34 @@ using get_state_result_t =
 template <class Sndr, class Rcvr>
 using state_type_t = std::decay_t<get_state_result_t<Sndr, Rcvr>>;
 
+// A state returned as a prvalue of its own type is constructed in place, without a move.
 template <class Sndr, class Rcvr>
+inline constexpr bool is_nothrow_state_init_v =
+    std::is_same_v<get_state_result_t<Sndr, Rcvr>, state_type_t<Sndr, Rcvr>> or
+    std::is_nothrow_constructible_v<state_type_t<Sndr, Rcvr>, get_state_result_t<Sndr, Rcvr>>;
+
+template <class Sndr, class Rcvr>
+inline constexpr bool is_nothrow_basic_state_v =
+    std::is_nothrow_move_constructible_v<Rcvr> and
+    noexcept(impls_for<tag_of_t<Sndr>>::get_state(std::declval<Sndr>(), std::declval<Rcvr &>())) and
+    is_nothrow_state_init_v<Sndr, Rcvr>;
+
+// Guaranteed copy elision does not reach [[no_unique_address]] members, so only an
+// empty state, the one that gains from overlapping, is declared that way; any other
+// state, immovable ones included, is initialized in place from get_state's prvalue.
+template <class Sndr, class Rcvr, bool = std::is_empty_v<state_type_t<Sndr, Rcvr>>>
 struct basic_state {
-    constexpr basic_state(Sndr &&sndr, Rcvr &&rcvr_) noexcept(
-        std::is_nothrow_move_constructible_v<Rcvr> and
-        noexcept(impls_for<tag_of_t<Sndr>>::get_state(std::declval<Sndr>(), std::declval<Rcvr &>())) and
-        std::is_nothrow_constructible_v<state_type_t<Sndr, Rcvr>, get_state_result_t<Sndr, Rcvr>>)
+    constexpr basic_state(Sndr &&sndr, Rcvr &&rcvr_) noexcept(is_nothrow_basic_state_v<Sndr, Rcvr>)
+        : rcvr(static_cast<Rcvr &&>(rcvr_)),
+          state(impls_for<tag_of_t<Sndr>>::get_state(static_cast<Sndr &&>(sndr), rcvr)) {}
+
+    Rcvr rcvr;
+    state_type_t<Sndr, Rcvr> state;
+};
+
+template <class Sndr, class Rcvr>
+struct basic_state<Sndr, Rcvr, true> {
+    constexpr basic_state(Sndr &&sndr, Rcvr &&rcvr_) noexcept(is_nothrow_basic_state_v<Sndr, Rcvr>)
         : rcvr(static_cast<Rcvr &&>(rcvr_)),
           state(impls_for<tag_of_t<Sndr>>::get_state(static_cast<Sndr &&>(sndr), rcvr)) {}
 
@@ -117,7 +144,11 @@ struct basic_receiver {
     basic_state<Sndr, Rcvr> *op;
 };
 
-template <class Sndr, class Rcvr, class Indices = std::make_index_sequence<remove_cvref_t<Sndr>::child_count>>
+template <class Sndr>
+inline constexpr std::size_t connected_child_count_v =
+    impls_for<tag_of_t<Sndr>>::connects_children ? remove_cvref_t<Sndr>::child_count : 0;
+
+template <class Sndr, class Rcvr, class Indices = std::make_index_sequence<connected_child_count_v<Sndr>>>
 struct basic_operation;
 
 template <class Sndr, class Rcvr, std::size_t... Is>

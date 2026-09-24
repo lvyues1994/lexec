@@ -29,23 +29,23 @@ C++17 是这个模型能成立的最低标准，因为有**保证拷贝消除**�
 - **没有 `std::stop_token`**：自行实现 `inplace_stop_source/token/callback` 和 `never_stop_token`。
 - **没有 consteval 和 constexpr 异常**：completion signatures 在类型层面用 `decltype` 计算。
 - **没有协程**：核心库不含 `task` / `as_awaitable`，将来可提供仅在 C++20 下启用的可选头文件。
-- **`[[no_unique_address]]` 是 C++20 特性**：GCC 和 Clang 在 C++17 模式下作为扩展支持，统一封装为 `LEXEC_NO_UNIQUE_ADDRESS`。Clang 18 在嵌套聚合初始化含这种空成员的类型时会崩溃，所以 `detail::tuple` 对空元素改用空基类优化，只有通过构造函数初始化的成员才使用这个宏。
+- **`[[no_unique_address]]` 是 C++20 特性**：GCC 和 Clang 在 C++17 模式下作为扩展支持，统一封装为 `LEXEC_NO_UNIQUE_ADDRESS`。Clang 18 在嵌套聚合初始化含这种空成员的类型时会崩溃，所以 `detail::tuple` 对空元素改用空基类优化，只有通过构造函数初始化的成员才使用这个宏。保证拷贝消除不适用于 `[[no_unique_address]]` 成员和基类子对象，所以框架只对空的算法状态使用这个宏；不可移动的状态（如 `let_*` 的状态）以普通成员从 prvalue 原地构造。
 
 ## 分层架构
 
 依赖严格自上而下，下层不知道上层存在。
 
-1. **基础设施（`detail`）**：配置宏、类型列表元编程、精简 tuple、`manual_lifetime`、原地构造辅助。
+1. **基础设施（`detail`）**：配置宏、类型列表元编程、精简 tuple、`manual_variant`（不可移动对象的原地构造）。
 2. **协议核心**：
    - 完成函数 `set_value` / `set_error` / `set_stopped`；
    - 定制点对象 `connect` / `start` / `get_env`；
    - 模拟的概念 `sender`、`receiver_of`、`operation_state`、`scheduler`；
-   - `completion_signatures` 及其变换工具。
-3. **环境与取消**：`env` / `prop`，查询 `get_stop_token`、`get_scheduler`、`get_allocator`、`get_completion_scheduler<Tag>`、`get_domain`，以及 stop token 家族。
+   - `completion_signatures` 及其变换工具；
+   - `transform_sender` 与 domain 分派：`connect` 和带环境的签名计算都作用于变换后的 sender。
+3. **环境与取消**：`env` / `prop`，查询 `get_stop_token`、`get_scheduler`、`get_allocator`、`get_completion_scheduler<Tag>`、`get_domain`、`get_completion_domain<Tag>`，以及 stop token 家族。
 4. **sender 框架**：
-   - `basic_sender<Tag, Data, Children...>`，每个算法只写钩子：`get_completion_signatures`、`get_attrs`、`get_env`、`get_state`、`start`、`complete`；
-   - 管道适配器闭包；
-   - `transform_sender` 与 domain 分派。
+   - `basic_sender<Tag, Data, Children...>`，每个算法只写钩子：`get_completion_signatures`、`get_attrs`、`get_env`、`get_state`、`start`、`complete`；需要自己管理子操作的算法（如 `let_*`）把 `connects_children` 设为 `false`，在状态里连接子 sender；
+   - 管道适配器闭包，以及以额外参数作为 sender 数据的适配器（`then`、`let_*`、`write_env` 等）。
 
    每个 sender 都能拆成「标签、数据、子 sender」，线程池等后端替换算法（如 `bulk`）依赖这个结构。
 5. **算法**：工厂、适配器、消费者、async_scope。
@@ -164,6 +164,10 @@ struct then_op {
 
 - `sync_wait` 位于 `lexec::sync_wait`，标准中是 `std::this_thread::sync_wait`。
 - `then` / `upon_error` / `upon_stopped` 直接调用函数对象，暂不支持成员指针；标准使用 `std::invoke`。
+- 没有 domain 变换时，`connect` 直接连接原 sender；标准的 `default_domain` 会先把右值 sender 移动成一个新值（LWG4368），这里为零拷贝省掉这次移动。公开的 `transform_sender` 仍按标准返回新值。
+- `let_*` 不声明完成调度器和完成 domain；标准会计算各个第二 sender 完成 domain 的公共 domain，这需要 `indeterminate_domain`，阶段 3 随 `when_all` 加入。
+- `get_completion_scheduler` 暂不实现 `RECURSE-QUERY`，`get_scheduler` 也不再询问调度器自己的完成调度器；两者只影响 `inline_scheduler` 这类在别处完成的调度器，阶段 3 随它加入。
+- `default_domain::apply_sender` 和 `sync_wait` 按 domain 分派尚未实现。
 
 ## 命名与风格
 
@@ -177,11 +181,13 @@ lexec/
   cmake/         仅用于自身开发构建的选项
   include/lexec/
     execution.hpp  stop_token.hpp
-    detail/      config.hpp meta.hpp tuple.hpp spin_wait.hpp manual_lifetime.hpp
-    core/        completion_tags.hpp completion_signatures.hpp env.hpp queries.hpp
-                 receiver.hpp operation_state.hpp sender.hpp sender_traits.hpp scheduler.hpp
-    framework/   basic_sender.hpp sender_adaptor_closure.hpp transform_sender.hpp
-    algorithms/  just.hpp then.hpp sync_wait.hpp let.hpp when_all.hpp continues_on.hpp bulk.hpp ...
+    detail/      config.hpp meta.hpp tuple.hpp spin_wait.hpp manual_variant.hpp
+    core/        completion_tags.hpp completion_signatures.hpp env.hpp queries.hpp domain.hpp
+                 transform_sender.hpp receiver.hpp operation_state.hpp sender.hpp
+                 sender_traits.hpp scheduler.hpp
+    framework/   basic_sender.hpp sender_adaptor_closure.hpp
+    algorithms/  just.hpp then.hpp let.hpp read_env.hpp write_env.hpp into_variant.hpp
+                 stopped_as.hpp sync_wait.hpp when_all.hpp continues_on.hpp bulk.hpp ...
     schedulers/  run_loop.hpp inline_scheduler.hpp static_thread_pool.hpp
   src/           static_thread_pool.cpp
   tests/         按层组织，含 static_assert 编译期测试、头文件自包含检查和 -O2 汇编比对
@@ -192,6 +198,7 @@ lexec/
 - `lexec::lexec`：只含头文件的核心（INTERFACE 目标），零依赖。
 - `lexec::runtime`：线程池等需要编译的运行时（STATIC 目标），阶段 3 引入。
 - Presets：GCC 和 Clang 各有 debug、release、asan（含 ubsan）、tsan、noexcept 五种。
+- 开发构建通过 `prlimit` 给每个编译器进程设 4 GiB 地址空间上限（`LEXEC_COMPILE_MEMORY_LIMIT`），模板实例化失控时编译报错退出，而不是耗尽机器内存。
 - 测试以 `-std=c++17` 构建，警告全开并使用 `-Werror`；CI 另外以 C++20 / C++23 构建，并在 GCC 10 / Clang 12 上验证最低版本。
 
 ## 实施计划
@@ -217,8 +224,12 @@ lexec/
 
 **阶段 2：单线程算法与定制**
 
-- 内容：`let_*`（连同它需要的 `detail/manual_lifetime`）、`read_env`、`write_env`、`into_variant`、`stopped_as_optional/error`、`unstoppable`、`transform_sender` 与 domain（含 `get_domain` 查询）。
-- 验收：每个算法的值、错误、停止三个通道测试；noexcept 传播测试；只能移动的类型的测试。
+- 内容：
+  - `let_value` / `let_error` / `let_stopped`：前驱与第二个操作共用 `detail::manual_variant` 存储，前驱的操作在调用函数之前销毁（P3373）；
+  - `read_env`、`write_env`、`unstoppable`、`into_variant`；
+  - `stopped_as_optional` / `stopped_as_error`：与标准相同，由 `transform_sender` 降级为 `let_stopped`、`then`、`just` 的组合；
+  - 按 C++26 最终版（P3826）实现的 domain：`default_domain`、`get_domain`、`get_completion_domain<Tag>`、带环境参数的 `get_completion_scheduler`、`transform_sender(sndr, env)`；`connect` 和带环境的签名计算都作用于变换后的 sender。
+- 验收：每个算法的值、错误、停止三个通道测试；noexcept 传播测试；只能移动的类型的测试；自定义 domain 的值变换、启动变换和多步变换测试；编译时间与阶段 1 对比。
 
 **阶段 3：并发**
 
@@ -248,3 +259,4 @@ lexec/
 - **编译时间**：C++17 的 SFINAE 比 concepts 更贵，从阶段 1 起持续记录。
 - **stop token 的并发正确性**：回调正在另一个线程执行时，注销方必须等待其完成。
 - **同步完成的栈深度**：长链或循环在 inline 完成时递归，阶段 5 用 trampoline 解决。
+- **类型名的超线性增长**：同一类型在模板实参里重复出现，会让嵌套类型的名字逐层翻倍，编译内存随之指数增长；阶段 1 的 GCC 调试信息和阶段 2 的 `let` 接收者都出现过。深层嵌套的编译时间探针和每个编译进程的内存上限用来及早发现它。

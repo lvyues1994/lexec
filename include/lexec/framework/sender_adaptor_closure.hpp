@@ -3,6 +3,7 @@
 #include <lexec/core/sender.hpp>
 #include <lexec/detail/meta.hpp>
 #include <lexec/detail/tuple.hpp>
+#include <lexec/framework/basic_sender.hpp>
 
 #include <type_traits>
 
@@ -39,6 +40,22 @@ template <class Tag, class... Args>
 constexpr partial_closure<Tag, std::decay_t<Args>...> make_partial_closure(Args &&...args) {
     return {{}, {{static_cast<Args &&>(args)}...}};
 }
+
+// An adaptor whose one extra argument becomes the data of the sender it builds:
+// `Tag{}(sndr, arg)` builds the sender and `Tag{}(arg)` a closure for `sndr | Tag{}(arg)`.
+template <class Tag>
+struct data_adaptor {
+    template <class Sndr, class Data, std::enable_if_t<is_sender_v<Sndr>, int> = 0>
+    constexpr auto operator()(Sndr &&sndr, Data &&data) const
+        -> basic_sender<Tag, std::decay_t<Data>, std::decay_t<Sndr>> {
+        return {static_cast<Data &&>(data), {{static_cast<Sndr &&>(sndr)}}};
+    }
+
+    template <class Data>
+    constexpr auto operator()(Data &&data) const -> partial_closure<Tag, std::decay_t<Data>> {
+        return make_partial_closure<Tag>(static_cast<Data &&>(data));
+    }
+};
 
 } // namespace detail
 

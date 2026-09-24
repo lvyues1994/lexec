@@ -5,9 +5,50 @@
 #include <lexec/detail/meta.hpp>
 #include <lexec/stop_token.hpp>
 
+#include <type_traits>
+#include <utility>
+
 namespace lexec {
 
+struct scheduler_t {};
+
 namespace detail {
+
+template <class Sch>
+using scheduler_concept_of_t = typename Sch::scheduler_concept;
+
+// Only the opt-in tag: queries cannot depend on the full scheduler concept, which
+// itself depends on senders.
+template <class Sch, bool = is_detected_v<scheduler_concept_of_t, Sch>>
+inline constexpr bool enable_scheduler_v = false;
+
+template <class Sch>
+inline constexpr bool enable_scheduler_v<Sch, true> = std::is_base_of_v<scheduler_t, typename Sch::scheduler_concept>;
+
+template <class Q, class Tag, class... Args>
+using query_with_args_t = decltype(std::declval<Q const &>().query(Tag{}, std::declval<Args>()...));
+
+template <class Q, class Tag>
+using query_without_args_t = decltype(std::declval<Q const &>().query(Tag{}));
+
+// TRY-QUERY: q.query(tag, args...) when valid, otherwise q.query(tag).
+template <class Q, class Tag, class... Args>
+inline constexpr bool has_try_query_v =
+    is_detected_v<query_with_args_t, Q, Tag, Args...> or is_detected_v<query_without_args_t, Q, Tag>;
+
+template <class Tag, class Q, class... Args>
+constexpr decltype(auto) try_query(Q const &q, Args const &...args) noexcept {
+    if constexpr (is_detected_v<query_with_args_t, Q, Tag, Args const &...>) {
+        static_assert(noexcept(q.query(Tag{}, args...)), "environment queries must be noexcept");
+        return q.query(Tag{}, args...);
+    } else {
+        static_assert(noexcept(q.query(Tag{})), "environment queries must be noexcept");
+        return q.query(Tag{});
+    }
+}
+
+template <class Tag, class Q, class... Args>
+using try_query_result_t = remove_cvref_t<decltype(try_query<Tag>(std::declval<Q const &>(), std::declval<Args const &>()...))>;
 
 // A forwarding query that must be answered by the environment; there is no default.
 template <class Derived>
@@ -43,9 +84,27 @@ struct get_allocator_t : detail::required_query<get_allocator_t> {};
 struct get_scheduler_t : detail::required_query<get_scheduler_t> {};
 struct get_delegation_scheduler_t : detail::required_query<get_delegation_scheduler_t> {};
 
+// Asks a sender's attributes where it completes. The optional environment is the
+// receiver's, for senders that complete wherever they are started. A scheduler asked
+// with an environment reports itself.
 template <class Tag>
-struct get_completion_scheduler_t : detail::required_query<get_completion_scheduler_t<Tag>> {
+struct get_completion_scheduler_t {
     static_assert(detail::is_completion_tag_v<Tag>, "get_completion_scheduler requires a completion tag");
+
+    template <class Q, class... Envs,
+              std::enable_if_t<detail::has_try_query_v<Q, get_completion_scheduler_t, Envs const &...> or
+                                   (detail::enable_scheduler_v<Q> and sizeof...(Envs) != 0),
+                               int> = 0>
+    constexpr auto operator()(Q const &q, Envs const &...envs) const noexcept {
+        static_assert(sizeof...(Envs) <= 1, "get_completion_scheduler accepts at most one environment");
+        if constexpr (detail::has_try_query_v<Q, get_completion_scheduler_t, Envs const &...>) {
+            return detail::try_query<get_completion_scheduler_t>(q, envs...);
+        } else {
+            return q;
+        }
+    }
+
+    static constexpr bool query(forwarding_query_t) noexcept { return true; }
 };
 
 inline constexpr get_stop_token_t get_stop_token{};

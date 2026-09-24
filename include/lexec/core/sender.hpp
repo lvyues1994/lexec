@@ -3,9 +3,11 @@
 #include <lexec/core/completion_signatures.hpp>
 #include <lexec/core/env.hpp>
 #include <lexec/core/receiver.hpp>
+#include <lexec/core/transform_sender.hpp>
 #include <lexec/detail/meta.hpp>
 
 #include <type_traits>
+#include <utility>
 
 namespace lexec {
 
@@ -54,11 +56,19 @@ struct completion_signatures_of_impl<false, true, Sndr, Env...> {
 };
 
 template <class Sndr, class... Env>
-struct completion_signatures_of
+struct declared_completion_signatures_of
     : completion_signatures_of_impl<is_detected_v<completions_member_t, Sndr, Env...>,
-                                    is_detected_v<completions_typedef_t, Sndr>, Sndr, Env...> {
+                                    is_detected_v<completions_typedef_t, Sndr>, Sndr, Env...> {};
+
+// With an environment, the completions are those of the sender that connect would
+// actually connect after the domains' transformations.
+template <class Sndr, class... Env>
+struct completion_signatures_of : declared_completion_signatures_of<Sndr> {
     static_assert(sizeof...(Env) <= 1, "completion signatures are computed with at most one environment");
 };
+
+template <class Sndr, class Env>
+struct completion_signatures_of<Sndr, Env> : declared_completion_signatures_of<connected_sender_t<Sndr, Env>, Env> {};
 
 } // namespace detail
 
@@ -103,12 +113,21 @@ constexpr bool check_connect() noexcept {
 } // namespace detail
 
 struct connect_t {
-    template <class Sndr, class Rcvr, class = detail::connect_member_t<Sndr, Rcvr>>
+    template <class Sndr, class Rcvr, class Connected = detail::connected_sender_t<Sndr, env_of_t<Rcvr>>,
+              class = detail::connect_member_t<Connected, Rcvr>>
     constexpr auto operator()(Sndr &&sndr, Rcvr &&rcvr) const
-        noexcept(noexcept(static_cast<Sndr &&>(sndr).connect(static_cast<Rcvr &&>(rcvr))))
-            -> detail::connect_member_t<Sndr, Rcvr> {
+        noexcept(detail::is_nothrow_transform_v<Sndr, env_of_t<Rcvr>> and
+                 noexcept(std::declval<Connected>().connect(std::declval<Rcvr>())))
+            -> detail::connect_member_t<Connected, Rcvr> {
         static_assert(detail::check_connect<Sndr, detail::remove_cvref_t<Rcvr>>());
-        return static_cast<Sndr &&>(sndr).connect(static_cast<Rcvr &&>(rcvr));
+        // No transformation applies in the common case; calling connect directly keeps
+        // an extra function per operation out of unoptimized builds.
+        if constexpr (detail::is_identity_connect_v<Sndr, env_of_t<Rcvr>>) {
+            return static_cast<Sndr &&>(sndr).connect(static_cast<Rcvr &&>(rcvr));
+        } else {
+            return detail::transform_changed_sender(static_cast<Sndr &&>(sndr), lexec::get_env(rcvr))
+                .connect(static_cast<Rcvr &&>(rcvr));
+        }
     }
 };
 

@@ -2,6 +2,7 @@
 
 #include <lexec/core/completion_signatures.hpp>
 #include <lexec/core/completion_tags.hpp>
+#include <lexec/core/domain.hpp>
 #include <lexec/framework/basic_sender.hpp>
 #include <lexec/detail/tuple.hpp>
 
@@ -27,6 +28,11 @@ template <class SetTag>
 struct just_impls : default_impls {
     template <class Self, class... Env>
     using completions = typename just_completions<SetTag, data_of_t<Self>>::type;
+
+    template <class Data>
+    static constexpr inline_attrs<SetTag> get_attrs(Data const &) noexcept {
+        return {};
+    }
 
     template <class State, class Rcvr>
     static constexpr void start(State &state, Rcvr &rcvr) noexcept {

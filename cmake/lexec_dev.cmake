@@ -10,6 +10,17 @@ set(LEXEC_SANITIZERS "" CACHE STRING "Value passed to -fsanitize= for lexec's ow
 set(LEXEC_TEST_LAUNCHER "" CACHE STRING "Command prefix, as a CMake list, for running lexec's tests")
 option(LEXEC_DISABLE_EXCEPTIONS "Build lexec's own targets with -fno-exceptions" OFF)
 option(LEXEC_WARNINGS_AS_ERRORS "Treat warnings as errors in lexec's own targets" ON)
+set(LEXEC_COMPILE_MEMORY_LIMIT 4294967296 CACHE STRING
+    "Address-space limit in bytes for each compiler process of lexec's own builds; 0 disables it")
+
+# A template change whose instantiations regress to super-linear growth then fails the
+# compilation instead of exhausting the machine's memory.
+if(LEXEC_COMPILE_MEMORY_LIMIT)
+    find_program(LEXEC_PRLIMIT prlimit)
+    if(LEXEC_PRLIMIT)
+        list(PREPEND CMAKE_CXX_COMPILER_LAUNCHER "${LEXEC_PRLIMIT}" "--as=${LEXEC_COMPILE_MEMORY_LIMIT}")
+    endif()
+endif()
 
 set(CMAKE_CXX_STANDARD ${LEXEC_CXX_STANDARD})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

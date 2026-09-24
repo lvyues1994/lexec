@@ -10,8 +10,6 @@
 
 namespace lexec {
 
-struct scheduler_t {};
-
 namespace detail {
 
 template <class Sch>
@@ -33,9 +31,6 @@ template <class Sch>
 using schedule_result_t = decltype(schedule(std::declval<Sch>()));
 
 namespace detail {
-
-template <class Sch>
-using scheduler_concept_of_t = typename Sch::scheduler_concept;
 
 template <class Sch>
 using equality_probe_t = std::enable_if_t<std::is_convertible_v<decltype(std::declval<Sch const &>() ==

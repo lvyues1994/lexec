@@ -15,7 +15,7 @@ import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 INCLUDE = HERE.parents[1] / "include"
-PROBES = ["include_only.cpp", "deep_pipeline.cpp"]
+PROBES = ["include_only.cpp", "deep_pipeline.cpp", "let_pipeline.cpp"]
 MODES = {"-O0": ["-O0"], "-O0 -g": ["-O0", "-g"]}
 RUNS = 5
 # A regressing probe must fail here instead of exhausting the machine's memory.

@@ -28,15 +28,23 @@ void destroy_operation(void *const op) noexcept {
     ::operator delete(op);
 }
 
-} // namespace
-
-TEST_CASE("an operation may be destroyed from inside its own completion") {
-    auto const sender = lexec::just(6) | lexec::then([](int v) noexcept { return v * 7; });
-    using operation = lexec::connect_result_t<decltype(sender) const &, destroying_receiver>;
+template <class Sndr>
+int run_until_destroyed(Sndr const &sender) {
+    using operation = lexec::connect_result_t<Sndr const &, destroying_receiver>;
     auto out = 0;
     auto *const storage = ::operator new(sizeof(operation));
     auto *const op = ::new (storage)
         operation(lexec::connect(sender, destroying_receiver{&destroy_operation<operation>, storage, &out}));
     lexec::start(*op);
-    CHECK(out == 42);
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("an operation may be destroyed from inside its own completion") {
+    CHECK(run_until_destroyed(lexec::just(6) | lexec::then([](int v) noexcept { return v * 7; })) == 42);
+}
+
+TEST_CASE("a let operation may be destroyed from inside its second operation's completion") {
+    CHECK(run_until_destroyed(lexec::just(6) | lexec::let_value([](int &v) noexcept { return lexec::just(v * 7); })) == 42);
 }
