@@ -5,8 +5,25 @@
 
 #include <doctest/doctest.h>
 
+#include <set>
 #include <string>
 #include <thread>
+
+namespace {
+
+// MSVC constructs a module's thread_local objects, doctest's streams among them, when a
+// thread starts, so measuring begins only after every worker has run work. Submissions
+// from a non-worker thread go to the workers in turn, and only a worker takes its own.
+void wait_until_workers_started(lexec::static_thread_pool &pool) {
+    auto workers = std::set<std::thread::id>{};
+    while (workers.size() < pool.available_parallelism()) {
+        auto const ran_on = lexec::sync_wait(lexec::schedule(pool.get_scheduler()) |
+                                             lexec::then([]() noexcept { return std::this_thread::get_id(); }));
+        workers.insert(std::get<0>(*ran_on));
+    }
+}
+
+} // namespace
 
 TEST_CASE("a synchronous pipeline allocates nothing") {
     auto const before = lexec_test::allocation_count();
@@ -20,6 +37,7 @@ TEST_CASE("a synchronous pipeline allocates nothing") {
 TEST_CASE("completing on another thread's run_loop allocates nothing") {
     auto loop = lexec::run_loop{};
     auto driver = std::thread{[&loop] { loop.run(); }};
+    lexec::sync_wait(lexec::schedule(loop.get_scheduler()));
     auto const before = lexec_test::allocation_count();
     auto const result =
         lexec::sync_wait(lexec::schedule(loop.get_scheduler()) | lexec::then([]() noexcept { return 42; }));
@@ -53,6 +71,7 @@ TEST_CASE("moving work to another thread's scheduler and back allocates nothing"
 
 TEST_CASE("scheduling on static_thread_pool allocates nothing") {
     auto pool = lexec::static_thread_pool{2};
+    wait_until_workers_started(pool);
     auto const before = lexec_test::allocation_count();
     auto const result = lexec::sync_wait(lexec::schedule(pool.get_scheduler()) |
                                          lexec::then([]() noexcept { return 42; }) |
