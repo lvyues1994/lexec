@@ -9,7 +9,7 @@ set(DOCTEST_NO_INSTALL ON)
 FetchContent_MakeAvailable(doctest)
 
 file(GLOB_RECURSE lexec_test_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
-list(FILTER lexec_test_sources EXCLUDE REGEX "/(asm|replacement)/")
+list(FILTER lexec_test_sources EXCLUDE REGEX "/(asm|coro|replacement)/")
 if(LEXEC_SANITIZERS)
     # Sanitizer runtimes define the global allocation functions the counter replaces.
     list(FILTER lexec_test_sources EXCLUDE REGEX "/allocation_(counter|test)\\.cpp$")
@@ -30,18 +30,61 @@ target_compile_definitions(lexec_replacement_tests PRIVATE
     $<$<BOOL:${LEXEC_DISABLE_EXCEPTIONS}>:DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS>)
 add_test(NAME lexec_replacement_tests COMMAND ${LEXEC_TEST_LAUNCHER} $<TARGET_FILE:lexec_replacement_tests>)
 
+function(lexec_add_header_check target)
+    set(sources "")
+    foreach(header IN LISTS ARGN)
+        string(MAKE_C_IDENTIFIER "${header}" header_id)
+        set(source "${CMAKE_CURRENT_BINARY_DIR}/header_check/${header_id}.cpp")
+        file(CONFIGURE OUTPUT "${source}" CONTENT "#include <${header}>\n#include <${header}>\n")
+        list(APPEND sources "${source}")
+    endforeach()
+    add_library(${target} OBJECT ${sources})
+endfunction()
+
 file(GLOB_RECURSE lexec_public_headers CONFIGURE_DEPENDS
     RELATIVE "${PROJECT_SOURCE_DIR}/include"
     "${PROJECT_SOURCE_DIR}/include/lexec/*.hpp")
-set(lexec_header_check_sources "")
-foreach(header IN LISTS lexec_public_headers)
-    string(MAKE_C_IDENTIFIER "${header}" header_id)
-    set(source "${CMAKE_CURRENT_BINARY_DIR}/header_check/${header_id}.cpp")
-    file(CONFIGURE OUTPUT "${source}" CONTENT "#include <${header}>\n#include <${header}>\n")
-    list(APPEND lexec_header_check_sources "${source}")
-endforeach()
-add_library(lexec_header_check OBJECT ${lexec_header_check_sources})
+# The bridges need the libraries they bridge to, and are checked with them below.
+set(lexec_bridge_headers ${lexec_public_headers})
+list(FILTER lexec_public_headers EXCLUDE REGEX "^lexec/coro/")
+list(FILTER lexec_bridge_headers INCLUDE REGEX "^lexec/coro/")
+lexec_add_header_check(lexec_header_check ${lexec_public_headers})
 target_link_libraries(lexec_header_check PRIVATE lexec::lexec lexec_dev)
+
+# The co2 bridge, whose tests fetch co2; co2 needs exceptions, and its headers are
+# included as system headers so that lexec's warnings do not apply to them.
+if(LEXEC_WITH_CO2 AND NOT LEXEC_DISABLE_EXCEPTIONS)
+    if(CMAKE_VERSION VERSION_LESS 3.25)
+        message(WARNING "The co2 bridge's tests need CMake 3.25 or newer; skipping them")
+    else()
+        FetchContent_Declare(co2
+            GIT_REPOSITORY https://github.com/lvyues1994/coro.git
+            GIT_TAG a265e5771b0e3ca68d6d473b9bb410fadddf4c23
+            SYSTEM)
+        FetchContent_MakeAvailable(co2)
+
+        file(GLOB lexec_coro_test_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/coro/*.cpp")
+        if(LEXEC_SANITIZERS)
+            list(FILTER lexec_coro_test_sources EXCLUDE REGEX "/allocation_test\\.cpp$")
+        else()
+            list(APPEND lexec_coro_test_sources support/allocation_counter.cpp)
+        endif()
+        add_executable(lexec_coro_tests ${lexec_coro_test_sources} test_main.cpp)
+        target_link_libraries(lexec_coro_tests PRIVATE lexec::lexec lexec::runtime lexec_dev co2::co2 doctest::doctest)
+        # co2 turns on MSVC's conforming preprocessor, under which older Windows SDK
+        # headers warn (C5105). co2's ThreadPool parks workers with a fence-based protocol,
+        # which GCC warns ThreadSanitizer cannot follow.
+        target_compile_options(lexec_coro_tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/wd5105>)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND LEXEC_SANITIZERS MATCHES "thread")
+            target_compile_options(lexec_coro_tests PRIVATE -Wno-tsan)
+        endif()
+        add_test(NAME lexec_coro_tests COMMAND ${LEXEC_TEST_LAUNCHER} $<TARGET_FILE:lexec_coro_tests>)
+
+        lexec_add_header_check(lexec_bridge_header_check ${lexec_bridge_headers})
+        target_link_libraries(lexec_bridge_header_check PRIVATE lexec::lexec lexec_dev co2::co2)
+        target_compile_options(lexec_bridge_header_check PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/wd5105>)
+    endif()
+endif()
 
 # Optimized regardless of build type and free of sanitizer instrumentation, so the
 # disassembly reflects what users get. The comparison reads objdump output, and MSVC's

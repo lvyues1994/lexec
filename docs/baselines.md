@@ -110,6 +110,13 @@
 - **拷贝与移动**：`continues_on` 和 `when_all` 都是每个值移动 1 次存入操作，0 次拷贝。
 - **堆分配**：在 `static_thread_pool` 上调度、`on` 到另一个线程的 `run_loop` 再回来，都不分配。
 
+## 零开销（协程桥）
+
+以下由 `tests/coro/allocation_test.cpp` 检查（`lexec_coro_tests`，sanitizer 构建中不运行）：
+
+- 在 co2 协程里等待 `schedule(pool)` 1000 次，只分配协程帧本身一次：awaiter 放得进 co2 的 64 字节内联槽（MSVC 上 `exception_ptr` 为两个指针宽，awaiter 超出，每次等待分配一次，测试按平台核对）；
+- `sync_wait(coro::as_sender(task))` 只分配 Task 的帧一次。
+
 ## 零开销（阶段 4）
 
 - **拷贝与移动**：

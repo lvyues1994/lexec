@@ -31,7 +31,7 @@ C++17 是这个模型能成立的最低标准，因为有**保证拷贝消除**�
 - **没有 concepts**：用检测惯用法加 `constexpr bool` 变量模板（`is_sender_v`、`is_receiver_of_v`）约束，在 `connect` / `sync_wait` 入口用 `static_assert` 给出可读的报错。
 - **没有 `std::stop_token`**：自行实现 `inplace_stop_source/token/callback` 和 `never_stop_token`。
 - **没有 consteval 和 constexpr 异常**：completion signatures 在类型层面用 `decltype` 计算。
-- **没有协程**：核心库不含 `task` / `as_awaitable`，将来可提供仅在 C++20 下启用的可选头文件。
+- **没有协程**：核心库不含 `task` / `as_awaitable`。协程由可选的桥 `lexec/coro/co2.hpp` 对接 co2（C++14 无栈协程库，协议与 C++20 协程同形），见「协程桥」。
 - **`[[no_unique_address]]` 是 C++20 特性**：GCC 和 Clang 在 C++17 模式下作为扩展支持，统一封装为 `LEXEC_NO_UNIQUE_ADDRESS`。Clang 18 在嵌套聚合初始化含这种空成员的类型时会崩溃，所以 `detail::tuple` 对空元素改用空基类优化，只有通过构造函数初始化的成员才使用这个宏。保证拷贝消除不适用于 `[[no_unique_address]]` 成员和基类子对象，所以框架只对空的算法状态使用这个宏；不可移动的状态（如 `let_*` 的状态）以普通成员从 prvalue 原地构造。存放子操作的 `inner_ops` 使用 `LEXEC_IMMOVABLE_NO_UNIQUE_ADDRESS`：MSVC 在 `/O2` 下对这种原地构造的 `[[msvc::no_unique_address]]` 成员会写出对象边界（C4789），所以该宏在 MSVC 上为空。
 
 ## 分层架构
@@ -173,6 +173,20 @@ struct then_op {
 - `parallel_scheduler` 的后端接口以 `lexec::span<std::byte>` 代替 `std::span<std::byte>`：后端是编译进运行时的虚函数，其签名不能随语言模式改变。`receiver_proxy::try_query` 只在接收者的 stop token 本身是 `inplace_stop_token` 时返回它，其余情况返回 `nullopt`（标准允许由实现决定）。关闭异常时，完成签名里没有 `exception_ptr`，后端若报告错误则调用 `std::terminate`。
 - 线程池上的 `bulk` 系列把前驱的值移动存入 op state，向下游发送的是这些衰变后的值（标准允许「值或其衰变副本」）；它的 `bulk_unchunked` 每次领取一批下标，仍逐个下标调用函数，但不保证每个下标各在一个执行代理上（标准对此只是推荐做法）。
 
+## 协程桥
+
+`lexec/coro/co2.hpp` 把 lexec 与 [co2](https://github.com/lvyues1994/coro) 接起来，不在 `execution.hpp` 里，需要 co2 的头文件，且只在开启异常时可用（co2 依赖异常）。命名空间是 `lexec::coro`。
+
+- **在 co2 协程里等待 sender**：lexec 的 sender 可以直接 `CO2_AWAIT(sndr)`（`lexec::detail` 里的 `operator_co_await` 经 ADL 被 co2 找到），其他命名空间的 sender 用 `coro::as_awaitable(sndr)`。结果与标准的 sender-awaitable 相同：一个值、`void`，或多个值的 `std::tuple`；错误以异常抛出（`exception_ptr` 原样，`error_code` 变成 `system_error`，其余包装成异常）。
+  - co2 把 awaiter 移进帧里的 awaiter 槽，所以 awaiter 在 `await_suspend` 之前只存 sender，到了最终地址才在同一块存储里 connect，op state 由此不必可移动；`schedule(pool)` 这类操作因此放得进 co2 的 64 字节内联槽，不分配。代价是 sender 在 connect 之前多移动一次。
+  - 在 `start` 里、在同一线程上同步完成的 sender 不挂起协程，同步 sender 的循环不会加深栈；其他完成都在完成处恢复协程，即使 `start` 还没返回（co2 在调用 `await_suspend` 之前就把协程视为挂起），因此 `schedule` 之后协程一定在调度器的线程上继续。
+  - 被等待的 sender 看到的环境只有协程的 stop token：co2 的 `stop_token` 包成 lexec 的可停止 token `coro::stop_token`，其回调就是 co2 的侵入式 `stop_callback`，不分配。
+- **co2 的 `Task` 当作 sender**：`coro::as_sender(task)`。op state 里有一个手写的 co2 帧，作为 Task 最终转移的目标，所以除 Task 自己的帧外不分配。接收者的 token 是 `coro::stop_token` 时直接传给 Task；不可停止时传空 token；否则建一个 co2 `stop_source` 并注册 lexec 回调转发停止请求（`stop_source` 分配一次）。
+- **co2 的 `Scheduler` 当作 lexec 调度器**：`coro::scheduler{pool}`，排队的是嵌在操作里的帧，不分配。
+- **stopped**：co2 没有 stopped 通道，所以等待到 stopped 时向协程抛出 `coro::stopped_error`；以它结束的 Task 被当作 sender 时，又映射回 `set_stopped`。
+- **与 co2 的耦合**：启动 Task 用 co2 根适配器共用的 `co2::detail::TaskAccess`，手写帧依赖 `co2::detail::FrameHeader` 的布局。开发构建通过 FetchContent 固定到 co2 的一个提交；`FETCHCONTENT_SOURCE_DIR_CO2` 可以指向本地副本。
+- **与 C++26 的差异**：C++26 的 `co_await sndr` 在协程的 `unhandled_stopped()` 处理 stopped，不经过异常；awaiter 超出 co2 的内联槽（例如 MSVC 上 `exception_ptr` 为两个指针宽）时，co2 会为它分配一次。
+
 ## 命名与风格
 
 统一使用标准库风格的 snake_case。其余规则：用 `struct` 关键字、east const、不写裸 `new`、严格的 `noexcept` 纪律。抽象接口只出现在冷路径（线程池后端、`parallel_scheduler` 后端）。
@@ -193,9 +207,11 @@ lexec/
     algorithms/  just.hpp then.hpp let.hpp read_env.hpp write_env.hpp into_variant.hpp
                  stopped_as.hpp sync_wait.hpp when_all.hpp continues_on.hpp starts_on.hpp bulk.hpp ...
     schedulers/  run_loop.hpp inline_scheduler.hpp static_thread_pool.hpp parallel_scheduler.hpp
+    coro/        co2.hpp（与 co2 协程库的桥，可选）
   src/           static_thread_pool.cpp parallel_scheduler.cpp（默认后端） bwos_queue.hpp（运行时库的私有实现）
   tests/         按层组织，含 static_assert 编译期测试、头文件自包含检查和 -O2 汇编比对；
-                 replacement/ 为替换 parallel_scheduler 后端的独立测试程序
+                 replacement/ 为替换 parallel_scheduler 后端的独立测试程序；coro/ 为协程桥的测试程序
+                 （拉取 co2）
   bench/         编译时间探针；pool/ 与 bulk/ 下为与 stdexec 对比的线程池和数据并行基准（stdexec 版以 C++20 编译），bulk/ 另含手写线程组作参照
   examples/
 ```
@@ -262,8 +278,9 @@ lexec/
 - 内容：
   - `simple_counting_scope` / `counting_scope`、`spawn` / `spawn_future` / `associate`；
   - `any_sender_of`、`when_any`；
-  - 循环类算法，需要 trampoline 防止同步完成导致栈溢出；
-  - 可选的 C++20 协程桥。
+  - 循环类算法，需要 trampoline 防止同步完成导致栈溢出。
+
+  在此之前先完成了与 co2 协程库的桥，见「协程桥」。
 
 ## 风险
 
