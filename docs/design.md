@@ -170,6 +170,7 @@ struct then_op {
 - 没有 domain 变换时，`connect` 直接连接原 sender；标准的 `default_domain` 会先把右值 sender 移动成一个新值（LWG4368），这里为零拷贝省掉这次移动。公开的 `transform_sender` 仍按标准返回新值。
 - `let_*` 和 `when_all` 对任何完成标签都报告同一个完成 domain（`let_*` 为各个第二 sender 与透传通道的公共 domain，`when_all` 为各子 sender 的公共 domain），没有信息时报告 `default_domain`；标准按完成标签分别计算。
 - `default_domain::apply_sender` 和 `sync_wait` 按 domain 分派尚未实现。
+- `parallel_scheduler` 的后端接口以 `lexec::span<std::byte>` 代替 `std::span<std::byte>`：后端是编译进运行时的虚函数，其签名不能随语言模式改变。`receiver_proxy::try_query` 只在接收者的 stop token 本身是 `inplace_stop_token` 时返回它，其余情况返回 `nullopt`（标准允许由实现决定）。关闭异常时，完成签名里没有 `exception_ptr`，后端若报告错误则调用 `std::terminate`。
 - 线程池上的 `bulk` 系列把前驱的值移动存入 op state，向下游发送的是这些衰变后的值（标准允许「值或其衰变副本」）；它的 `bulk_unchunked` 每次领取一批下标，仍逐个下标调用函数，但不保证每个下标各在一个执行代理上（标准对此只是推荐做法）。
 
 ## 命名与风格
@@ -191,9 +192,10 @@ lexec/
     framework/   basic_sender.hpp sender_adaptor_closure.hpp
     algorithms/  just.hpp then.hpp let.hpp read_env.hpp write_env.hpp into_variant.hpp
                  stopped_as.hpp sync_wait.hpp when_all.hpp continues_on.hpp starts_on.hpp bulk.hpp ...
-    schedulers/  run_loop.hpp inline_scheduler.hpp static_thread_pool.hpp
-  src/           static_thread_pool.cpp bwos_queue.hpp（运行时库的私有实现）
-  tests/         按层组织，含 static_assert 编译期测试、头文件自包含检查和 -O2 汇编比对
+    schedulers/  run_loop.hpp inline_scheduler.hpp static_thread_pool.hpp parallel_scheduler.hpp
+  src/           static_thread_pool.cpp parallel_scheduler.cpp（默认后端） bwos_queue.hpp（运行时库的私有实现）
+  tests/         按层组织，含 static_assert 编译期测试、头文件自包含检查和 -O2 汇编比对；
+                 replacement/ 为替换 parallel_scheduler 后端的独立测试程序
   bench/         编译时间探针；pool/ 与 bulk/ 下为与 stdexec 对比的线程池和数据并行基准（stdexec 版以 C++20 编译），bulk/ 另含手写线程组作参照
   examples/
 ```
@@ -249,7 +251,10 @@ lexec/
 - 内容：
   - `bulk` / `bulk_chunked` / `bulk_unchunked`：与标准相同，`bulk` 由 `transform_sender` 降级为 `bulk_chunked`，所以定制 `bulk_chunked` 的 domain 也定制了 `bulk`；默认实现在前驱完成的执行代理上运行，`bulk_chunked` 以整个区间调用一次函数，`bulk_unchunked` 逐个下标调用；
   - 线程池通过 domain 定制 `bulk_chunked` / `bulk_unchunked`，不分配：op state 里只有一个作业描述符，发布到线程池的作业链表；作业切成 min(元素数, 4×worker 数) 块，worker 取任务前先加入还有分块可领的作业，以原子计数领取分块，发布作业的线程自己也立即参与；作业以引用计数管理，最后离开的线程通知下游，这也保证作业的内存在无人访问之后才可能被释放；前驱的值跨线程时移动一次存入 op state；自旋中的 worker 每轮只从 2 个对象窃取，以便尽快看到新作业；
-  - `parallel_scheduler`：以 `static_thread_pool` 为默认后端，后端可在链接时替换。
+  - `parallel_scheduler` 与 `get_parallel_scheduler()`，以及 `get_forward_progress_guarantee`：
+    - 后端接口 `parallel_scheduler_replacement::parallel_scheduler_backend` 与标准相同；每个操作自身就是 `receiver_proxy` / `bulk_item_receiver_proxy`，并为后端预留 128 字节存储；
+    - 它的 domain 在任何策略下接管 `bulk_chunked` / `bulk_unchunked`：并行策略按 `shape` 调用后端，其余策略以一次调用跑完全部下标；
+    - `lexec::runtime` 的默认后端是一个每硬件线程一个 worker 的 `static_thread_pool`，在预留存储里建立任务和 bulk 作业，不分配；它单独在一个源文件里，程序自己定义 `query_parallel_scheduler_backend` 时，静态库的这个成员就不会被链接（GCC / Clang 上它另外是弱符号）。
 - 验收：从 1 到 N 线程的扩展性曲线，与手写 `std::thread` 常驻线程加屏障分块以及 stdexec 对比；分块粒度由基准决定。
 
 **阶段 5：结构化并发与边界工具**

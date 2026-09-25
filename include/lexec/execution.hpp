@@ -34,5 +34,6 @@
 #include <lexec/algorithms/write_env.hpp>
 
 #include <lexec/schedulers/inline_scheduler.hpp>
+#include <lexec/schedulers/parallel_scheduler.hpp>
 #include <lexec/schedulers/run_loop.hpp>
 #include <lexec/schedulers/static_thread_pool.hpp>

@@ -64,12 +64,6 @@ struct pool_scheduler;
 template <bool Chunked, class Child, class Shape, class Fn>
 struct pool_bulk_sender;
 
-template <class Sndr>
-using bulk_child_attrs_t = env_of_t<typename remove_cvref_t<Sndr>::template child_type<0> const &>;
-
-template <class Sndr, class Env>
-using bulk_child_scheduler_t = completion_scheduler_result_t<set_value_t, bulk_child_attrs_t<Sndr>, Env>;
-
 // The bulk senders the pool runs in parallel: those whose policy allows it, and whose
 // predecessor completes on a pool, which is the one to run them.
 template <class Sndr, class Env, class = void>
@@ -94,6 +88,10 @@ struct pool_scheduler {
     template <class... Env>
     constexpr pool_domain query(get_completion_domain_t<set_value_t>, Env const &...) const noexcept {
         return {};
+    }
+
+    static constexpr forward_progress_guarantee query(get_forward_progress_guarantee_t) noexcept {
+        return forward_progress_guarantee::parallel;
     }
 
     friend bool operator==(pool_scheduler const lhs, pool_scheduler const rhs) noexcept { return lhs.pool == rhs.pool; }
@@ -152,51 +150,10 @@ struct pool_operation : pool_task {
 
 inline pool_sender pool_scheduler::schedule() const noexcept { return pool_sender{pool}; }
 
-// The function runs on several threads with lvalues of the values, which are therefore
-// moved into the operation first.
-template <bool Chunked, class Fn, class Shape, class... Vs>
-struct pool_bulk_call {
-    using call = bulk_call<Chunked, Fn, Shape, std::decay_t<Vs>...>;
-    static constexpr bool callable = call::callable;
-    static constexpr bool nothrow = call::nothrow and is_nothrow_decay_copyable_t<Vs...>::value;
-};
-
-template <bool Chunked, class Fn, class Shape>
-struct pool_bulk_transforms {
-    template <class... Vs>
-    using on_value = typename bulk_value_completions<pool_bulk_call<Chunked, Fn, Shape, Vs...>, std::decay_t<Vs>...>::type;
-};
-
 template <bool Chunked, class CvChild, class Shape, class Fn, class... Env>
 using pool_bulk_completions_t =
     transform_completion_signatures<completion_signatures_of_t<CvChild, fwd_env_t<Env>...>, completion_signatures<>,
-                                    pool_bulk_transforms<Chunked, Fn, Shape>::template on_value>;
-
-template <class... Vs>
-using decayed_tuple_t = tuple<std::decay_t<Vs>...>;
-
-template <class Sigs>
-using pool_bulk_values_t = rename_t<unique_t<gather_signatures_t<set_value_t, Sigs, decayed_tuple_t, type_list>>, manual_variant>;
-
-// The first exception any invocation of the function throws.
-struct pool_bulk_failure {
-    std::atomic<bool> failed{false};
-    std::exception_ptr error;
-};
-
-template <bool Chunked, class Fn, class Shape, class Stored>
-inline constexpr bool pool_bulk_may_throw_v = false;
-
-template <bool Chunked, class Fn, class Shape, class Indices, class... Vs>
-inline constexpr bool pool_bulk_may_throw_v<Chunked, Fn, Shape, tuple_impl<Indices, Vs...>> =
-    LEXEC_HAS_EXCEPTIONS and not bulk_call<Chunked, Fn, Shape, Vs...>::nothrow;
-
-template <bool Chunked, class Fn, class Shape, class Values>
-inline constexpr bool pool_bulk_can_fail_v = false;
-
-template <bool Chunked, class Fn, class Shape, class... Stored>
-inline constexpr bool pool_bulk_can_fail_v<Chunked, Fn, Shape, manual_variant<Stored...>> =
-    (pool_bulk_may_throw_v<Chunked, Fn, Shape, Stored> or ...);
+                                    stored_bulk_transforms<Chunked, Fn, Shape>::template on_value>;
 
 template <bool Chunked, class CvChild, class Shape, class Fn, class Rcvr>
 struct pool_bulk_operation;
@@ -226,10 +183,10 @@ template <bool Chunked, class CvChild, class Shape, class Fn, class Rcvr>
 struct pool_bulk_operation : pool_bulk_job {
     using operation_state_concept = operation_state_t;
     using child_receiver = pool_bulk_receiver<Chunked, CvChild, Shape, Fn, Rcvr>;
-    using values_type = pool_bulk_values_t<completion_signatures_of_t<CvChild, fwd_env_t<env_of_t<Rcvr>>>>;
+    using values_type = stored_bulk_values_t<completion_signatures_of_t<CvChild, fwd_env_t<env_of_t<Rcvr>>>>;
 
     template <class Stored>
-    static constexpr bool may_throw = pool_bulk_may_throw_v<Chunked, Fn, Shape, Stored>;
+    static constexpr bool may_throw = stored_bulk_may_throw_v<Chunked, Fn, Shape, Stored>;
 
     template <class Child, class F>
     pool_bulk_operation(thread_pool_impl *pool_, Child &&child, Shape const shape_, F &&fn_, Rcvr &&rcvr_) noexcept(
@@ -322,14 +279,14 @@ struct pool_bulk_operation : pool_bulk_job {
         });
     }
 
-    static constexpr bool can_fail = pool_bulk_can_fail_v<Chunked, Fn, Shape, values_type>;
+    static constexpr bool can_fail = stored_bulk_can_fail_v<Chunked, Fn, Shape, values_type>;
 
     thread_pool_impl *pool;
     Shape shape;
     Fn fn;
     Rcvr rcvr;
     values_type values;
-    LEXEC_NO_UNIQUE_ADDRESS std::conditional_t<can_fail, pool_bulk_failure, no_data> failure;
+    LEXEC_NO_UNIQUE_ADDRESS std::conditional_t<can_fail, bulk_failure, no_data> failure;
     connect_result_t<CvChild, child_receiver> child_op;
 };
 

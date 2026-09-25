@@ -111,6 +111,25 @@ TEST_CASE("parallel bulk on static_thread_pool allocates nothing") {
     CHECK(after == before);
 }
 
+TEST_CASE("scheduling and bulk work on the parallel scheduler allocate nothing") {
+    auto const sch = lexec::get_parallel_scheduler();
+    // The backend's workers start with it; each must have run work before measuring.
+    auto workers = std::set<std::thread::id>{};
+    for (auto round = 0; round < 10'000 and workers.size() < lexec::static_thread_pool::default_thread_count(); ++round) {
+        auto const ran_on = lexec::sync_wait(lexec::schedule(sch) |
+                                             lexec::then([]() noexcept { return std::this_thread::get_id(); }));
+        workers.insert(std::get<0>(*ran_on));
+    }
+    auto values = std::vector<int>(4096);
+    auto const before = lexec_test::allocation_count();
+    lexec::sync_wait(lexec::schedule(sch) | lexec::bulk(lexec::par, 4096, [&values](int i) noexcept {
+                         values[static_cast<std::size_t>(i)] = i;
+                     }));
+    auto const after = lexec_test::allocation_count();
+    CHECK(values[4095] == 4095);
+    CHECK(after == before);
+}
+
 TEST_CASE("the allocation counter observes allocations") {
     auto const before = lexec_test::allocation_count();
     auto const text = std::string(64, 'x');

@@ -9,7 +9,7 @@ set(DOCTEST_NO_INSTALL ON)
 FetchContent_MakeAvailable(doctest)
 
 file(GLOB_RECURSE lexec_test_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
-list(FILTER lexec_test_sources EXCLUDE REGEX "/asm/")
+list(FILTER lexec_test_sources EXCLUDE REGEX "/(asm|replacement)/")
 if(LEXEC_SANITIZERS)
     # Sanitizer runtimes define the global allocation functions the counter replaces.
     list(FILTER lexec_test_sources EXCLUDE REGEX "/allocation_(counter|test)\\.cpp$")
@@ -22,6 +22,13 @@ target_include_directories(lexec_tests PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_compile_definitions(lexec_tests PRIVATE
     $<$<BOOL:${LEXEC_DISABLE_EXCEPTIONS}>:DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS>)
 add_test(NAME lexec_tests COMMAND ${LEXEC_TEST_LAUNCHER} $<TARGET_FILE:lexec_tests>)
+
+# A program of its own, since it replaces a function that a program defines once.
+add_executable(lexec_replacement_tests replacement/parallel_scheduler_replacement_test.cpp test_main.cpp)
+target_link_libraries(lexec_replacement_tests PRIVATE lexec::lexec lexec::runtime lexec_dev doctest::doctest)
+target_compile_definitions(lexec_replacement_tests PRIVATE
+    $<$<BOOL:${LEXEC_DISABLE_EXCEPTIONS}>:DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS>)
+add_test(NAME lexec_replacement_tests COMMAND ${LEXEC_TEST_LAUNCHER} $<TARGET_FILE:lexec_replacement_tests>)
 
 file(GLOB_RECURSE lexec_public_headers CONFIGURE_DEPENDS
     RELATIVE "${PROJECT_SOURCE_DIR}/include"

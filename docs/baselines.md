@@ -115,4 +115,4 @@
 - **拷贝与移动**：
   - `bulk` 系列在前驱完成的执行代理上运行时，值以左值引用交给函数、再以右值引用交给下游，0 次拷贝，0 次移动；
   - 在 `static_thread_pool` 上并行运行时，值移动 1 次存入 op state，0 次拷贝（`tests/schedulers/pool_bulk_test.cpp`）。
-- **堆分配**：`bulk` 与 `bulk_chunked` 组成的管道不分配；在 `static_thread_pool` 上并行运行 `bulk` 也不分配。
+- **堆分配**：`bulk` 与 `bulk_chunked` 组成的管道不分配；在 `static_thread_pool` 上并行运行 `bulk` 也不分配；`parallel_scheduler` 的默认后端建立之后（第一次 `get_parallel_scheduler()` 分配一次），在它上面调度和并行运行 `bulk` 都不分配。

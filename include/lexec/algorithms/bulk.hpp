@@ -3,12 +3,16 @@
 #include <lexec/core/completion_signatures.hpp>
 #include <lexec/core/completion_tags.hpp>
 #include <lexec/core/sender.hpp>
+#include <lexec/core/domain.hpp>
 #include <lexec/detail/config.hpp>
+#include <lexec/detail/manual_variant.hpp>
 #include <lexec/detail/meta.hpp>
+#include <lexec/detail/tuple.hpp>
 #include <lexec/execution_policy.hpp>
 #include <lexec/framework/basic_sender.hpp>
 #include <lexec/framework/sender_adaptor_closure.hpp>
 
+#include <atomic>
 #include <exception>
 #include <type_traits>
 
@@ -142,6 +146,57 @@ struct bulk_chunk_loop {
 
     Fn fn;
 };
+
+// For schedulers that run the function on other threads: they store the predecessor's
+// values first, so the function gets lvalues of decayed copies, which then go downstream.
+
+template <bool Chunked, class Fn, class Shape, class... Vs>
+struct stored_bulk_call {
+    using call = bulk_call<Chunked, Fn, Shape, std::decay_t<Vs>...>;
+    static constexpr bool callable = call::callable;
+    static constexpr bool nothrow = call::nothrow and is_nothrow_decay_copyable_t<Vs...>::value;
+};
+
+template <bool Chunked, class Fn, class Shape>
+struct stored_bulk_transforms {
+    template <class... Vs>
+    using on_value = typename bulk_value_completions<stored_bulk_call<Chunked, Fn, Shape, Vs...>, std::decay_t<Vs>...>::type;
+};
+
+template <class... Vs>
+using decayed_tuple_t = tuple<std::decay_t<Vs>...>;
+
+template <class Sigs>
+using stored_bulk_values_t =
+    rename_t<unique_t<gather_signatures_t<set_value_t, Sigs, decayed_tuple_t, type_list>>, manual_variant>;
+
+// The first exception any invocation of the function throws.
+struct bulk_failure {
+    std::atomic<bool> failed{false};
+    std::exception_ptr error;
+};
+
+template <bool Chunked, class Fn, class Shape, class Stored>
+inline constexpr bool stored_bulk_may_throw_v = false;
+
+template <bool Chunked, class Fn, class Shape, class Indices, class... Vs>
+inline constexpr bool stored_bulk_may_throw_v<Chunked, Fn, Shape, tuple_impl<Indices, Vs...>> =
+    LEXEC_HAS_EXCEPTIONS and not bulk_call<Chunked, Fn, Shape, Vs...>::nothrow;
+
+template <bool Chunked, class Fn, class Shape, class Values>
+inline constexpr bool stored_bulk_can_fail_v = false;
+
+template <bool Chunked, class Fn, class Shape, class... Stored>
+inline constexpr bool stored_bulk_can_fail_v<Chunked, Fn, Shape, manual_variant<Stored...>> =
+    (stored_bulk_may_throw_v<Chunked, Fn, Shape, Stored> or ...);
+
+// Where the predecessor of a bulk sender completes, which is where a scheduler that takes
+// over the bulk work runs it.
+template <class Sndr>
+using bulk_child_attrs_t = env_of_t<typename remove_cvref_t<Sndr>::template child_type<0> const &>;
+
+template <class Sndr, class Env>
+using bulk_child_scheduler_t = completion_scheduler_result_t<set_value_t, bulk_child_attrs_t<Sndr>, Env>;
 
 template <class Shape>
 inline constexpr bool is_bulk_shape_v = std::is_integral_v<Shape> and not std::is_same_v<Shape, bool>;

@@ -39,6 +39,10 @@ struct run_loop_scheduler {
 
     run_loop_sender schedule() const noexcept;
 
+    static constexpr forward_progress_guarantee query(get_forward_progress_guarantee_t) noexcept {
+        return forward_progress_guarantee::parallel;
+    }
+
     friend bool operator==(run_loop_scheduler lhs, run_loop_scheduler rhs) noexcept { return lhs.loop == rhs.loop; }
     friend bool operator!=(run_loop_scheduler lhs, run_loop_scheduler rhs) noexcept { return lhs.loop != rhs.loop; }
 

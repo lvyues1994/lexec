@@ -44,7 +44,7 @@ endif()
 
 # The compiled part of lexec: execution resources such as static_thread_pool.
 find_package(Threads REQUIRED)
-add_library(lexec_runtime STATIC src/static_thread_pool.cpp)
+add_library(lexec_runtime STATIC src/static_thread_pool.cpp src/parallel_scheduler.cpp)
 add_library(lexec::runtime ALIAS lexec_runtime)
 target_link_libraries(lexec_runtime PUBLIC lexec::lexec Threads::Threads)
 target_include_directories(lexec_runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")

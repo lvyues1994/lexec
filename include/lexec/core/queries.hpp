@@ -162,10 +162,27 @@ struct get_scheduler_t {
     static constexpr bool query(forwarding_query_t) noexcept { return true; }
 };
 
+enum class forward_progress_guarantee { concurrent, parallel, weakly_parallel };
+
+// What the execution agents a scheduler creates guarantee about making progress; weakly
+// parallel unless the scheduler says otherwise.
+struct get_forward_progress_guarantee_t {
+    template <class Sch>
+    constexpr forward_progress_guarantee operator()(Sch const &sch) const noexcept {
+        if constexpr (detail::has_query_v<Sch const &, get_forward_progress_guarantee_t>) {
+            static_assert(noexcept(sch.query(get_forward_progress_guarantee_t{})), "scheduler queries must be noexcept");
+            return sch.query(get_forward_progress_guarantee_t{});
+        } else {
+            return forward_progress_guarantee::weakly_parallel;
+        }
+    }
+};
+
 inline constexpr get_stop_token_t get_stop_token{};
 inline constexpr get_allocator_t get_allocator{};
 inline constexpr get_scheduler_t get_scheduler{};
 inline constexpr get_delegation_scheduler_t get_delegation_scheduler{};
+inline constexpr get_forward_progress_guarantee_t get_forward_progress_guarantee{};
 
 template <class Tag>
 inline constexpr get_completion_scheduler_t<Tag> get_completion_scheduler{};
