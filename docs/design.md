@@ -152,7 +152,7 @@ struct then_op {
 - **`tag_invoke` 定制**：C++26 已改为成员函数（P2855）。`tag_invoke` 依赖 ADL 大重载集，在没有 concepts 的 C++17 下编译更慢、报错更难读，也会让迁移到 std 变难。
 - **future/promise 风格**：每个 continuation 都需要堆上共享状态加同步。
 - **默认类型擦除**：阻断内联，只在 ABI 边界作为可选工具。
-- **内部使用 `std::tuple` / `std::variant`**：`std::variant` 有 valueless 状态且对不可移动类型不友好；libstdc++ 的 `std::tuple` 是递归继承实现，编译慢且不是聚合体。内部用精简实现，只在标准规定的用户可见位置（`sync_wait` 返回值、`into_variant`）使用 std 类型。
+- **内部使用 `std::tuple` / `std::variant`**：`std::variant` 有 valueless 状态且对不可移动类型不友好；libstdc++ 的 `std::tuple` 是递归继承实现，编译慢且不是聚合体。内部用精简实现，只在标准规定的用户可见位置（`sync_wait` / `sync_wait_with_variant` 的返回值、`into_variant`）使用 std 类型。
 
 ## 与 stdexec 的关系
 
@@ -165,11 +165,12 @@ struct then_op {
 
 与标准的已知差异：
 
-- `sync_wait` 位于 `lexec::sync_wait`，标准中是 `std::this_thread::sync_wait`。
+- `sync_wait` / `sync_wait_with_variant` 位于 `lexec::`，标准中在 `std::this_thread::`。
+- `sync_wait_with_variant` 把值直接构造进结果的 variant，每个值只移动一次；标准写成先 `into_variant` 再 `sync_wait`，再把 variant 移出来，要多移动两次整个 variant。返回类型、停止与错误的处理与标准相同。
 - `then` / `upon_error` / `upon_stopped` 直接调用函数对象，暂不支持成员指针；标准使用 `std::invoke`。
 - 没有 domain 变换时，`connect` 直接连接原 sender；标准的 `default_domain` 会先把右值 sender 移动成一个新值（LWG4368），这里为零拷贝省掉这次移动。公开的 `transform_sender` 仍按标准返回新值。
 - `let_*` 和 `when_all` 对任何完成标签都报告同一个完成 domain（`let_*` 为各个第二 sender 与透传通道的公共 domain，`when_all` 为各子 sender 的公共 domain），没有信息时报告 `default_domain`；标准按完成标签分别计算。
-- `default_domain::apply_sender` 和 `sync_wait` 按 domain 分派尚未实现。
+- `default_domain::apply_sender`，以及 `sync_wait` / `sync_wait_with_variant` 按 domain 分派，尚未实现。
 - 计数作用域的 `join()`：接收者环境没有 `get_start_scheduler` 时，在结束最后一个关联的线程上直接完成；标准此时不能连接。
 - `spawn_future`：消费者收到停止请求时立即以 set_stopped 完成，共享状态在派生的操作完成后才销毁（草案的文字在此处销毁得过早）。
 - `inplace_stop_source::request_stop` 允许正在执行的回调销毁这个 source（连同还没执行的回调），之后不再访问它；co2 的 `stop_source` 也有这一保证，标准没有写。`when_all`、`when_any`、`stop-when`、`any_sender_of` 都按标准的写法把接收者的停止请求转发给操作自己的 source，子操作若在这次请求里同步完成，接收者可以立即销毁整个操作，source 也随之销毁。stdexec 在 `when_all` / `when_any` 里改为转发期间多占一个计数；照此实现时 TSan 发现，这次加一若落在计数归零之后，操作会完成两次，所以这里在 source 一侧解决，转发方只调用 `request_stop`。
@@ -292,6 +293,7 @@ lexec/
     - 不超过 4 个指针、nothrow 可移动的 sender 内联存放，否则放在堆上；connect 总要分配一次，因为操作的类型只有被擦除的 sender 知道；
     - `any_scheduler` 同样内联存放调度器，`schedule()` 的 sender 在属性里报告这个 `any_scheduler` 为完成调度器；两个 `any_scheduler` 相等，当且仅当所持调度器类型相同且相等；
   - `when_any`，语义与 stdexec 相同：第一个完成的子 sender 胜出，不论哪个通道；它的结果衰变后存入 op state，其余子 sender 被请求停止，全部结束后才把结果交给接收者，接收者此时已请求停止则改为 set_stopped。完成签名是各子 sender 签名衰变后的并集加上 set_stopped，存储结果可能抛异常时再加 `set_error_t(std::exception_ptr)`；环境与 stop source 的转发和 `when_all` 共用；
+  - `sync_wait_with_variant`：阶段 1 漏掉了，这时补上，与 `sync_wait` 共用等待和存储结果的实现；
   - 循环类算法，需要 trampoline 防止同步完成导致栈溢出。
 
   在此之前先完成了与 co2 协程库的桥，见「协程桥」。

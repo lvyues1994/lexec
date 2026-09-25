@@ -36,6 +36,15 @@ TEST_CASE("sync_wait stores the final value with a single move") {
     CHECK(counted::counts.moves == 1);
 }
 
+TEST_CASE("sync_wait_with_variant stores the final value with a single move") {
+    counted::reset();
+    auto const result =
+        lexec::sync_wait_with_variant(lexec::just() | lexec::then([]() noexcept { return counted{7}; }));
+    CHECK(std::get<0>(std::get<0>(*result)).value == 7);
+    CHECK(counted::counts.copies == 0);
+    CHECK(counted::counts.moves == 1);
+}
+
 // Construction moves a captured value once into just, once per enclosing adaptor, and
 // once into the operation state at connect.
 TEST_CASE("building and connecting an rvalue pipeline moves captured values and never copies them") {
