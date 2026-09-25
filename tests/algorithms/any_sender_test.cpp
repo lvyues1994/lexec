@@ -140,6 +140,18 @@ TEST_CASE("the erased sender sees the receiver's stop requests") {
     CHECK(log.stopped_count == 1);
 }
 
+// The forwarded request completes the erased sender inside the erased operation's own
+// stop source, and the receiver destroys the operation at once.
+TEST_CASE("an erased operation may go as soon as a forwarded stop request completes it") {
+    auto source = lexec::inplace_stop_source{};
+    auto log = lexec_test::completion_log{};
+    lexec::any_sender_of<set_value_t(), set_stopped_t()> erased = lexec_test::until_stopped_sender{};
+    lexec_test::start_destroyed_on_completion(
+        lexec::write_env(std::move(erased), lexec::prop{lexec::get_stop_token, wrapped_token{source.get_token()}}), log);
+    source.request_stop();
+    CHECK(log.stopped_count == 1);
+}
+
 TEST_CASE("an any_sender can be moved before it is connected") {
     int_sender first = lexec::just(5);
     int_sender second = std::move(first);

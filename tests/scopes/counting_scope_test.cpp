@@ -236,6 +236,42 @@ TEST_CASE("a consumer's stop request completes the future with stopped while the
     CHECK(lexec::sync_wait(scope.join()).has_value());
 }
 
+// Either stop request completes the wrapped sender inside the stop source that the
+// wrapping operation holds, and the receiver destroys that operation at once.
+TEST_CASE("a wrapped sender's operation may go as soon as a stop request completes it") {
+    auto scope = lexec::counting_scope{};
+    auto source = lexec::inplace_stop_source{};
+    auto log = lexec_test::completion_log{};
+    lexec_test::start_destroyed_on_completion(lexec::write_env(scope.get_token().wrap(lexec_test::until_stopped_sender{}),
+                                                               lexec::prop{lexec::get_stop_token, source.get_token()}),
+                                              log);
+    source.request_stop();
+    CHECK(log.stopped_count == 1);
+    auto unused = lexec::inplace_stop_source{};
+    lexec_test::start_destroyed_on_completion(lexec::write_env(scope.get_token().wrap(lexec_test::until_stopped_sender{}),
+                                                               lexec::prop{lexec::get_stop_token, unused.get_token()}),
+                                              log);
+    scope.request_stop();
+    CHECK(log.stopped_count == 2);
+}
+
+// The consumer's stop request stops the work inside the request; the consumer then
+// completes with stopped and is destroyed before the request returns.
+TEST_CASE("a consumer may go as soon as its stop request stops the work") {
+    auto scope = lexec::counting_scope{};
+    auto source = lexec::inplace_stop_source{};
+    auto log = lexec_test::completion_log{};
+    lexec_test::start_destroyed_on_completion(
+        lexec::write_env(lexec::spawn_future(lexec_test::until_stopped_sender{}, scope.get_token()),
+                         lexec::prop{lexec::get_stop_token, source.get_token()}),
+        log);
+    CHECK(log.total() == 0);
+    source.request_stop();
+    CHECK(log.stopped_count == 1);
+    CHECK(log.total() == 1);
+    CHECK(lexec::sync_wait(scope.join()).has_value());
+}
+
 // Many threads spawn and associate at once; TSan checks the scope's state machine.
 TEST_CASE("concurrent spawns, associations, and futures all end before join completes") {
     auto pool = lexec::static_thread_pool{4};

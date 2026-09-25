@@ -88,6 +88,33 @@ TEST_CASE("a callback may destroy itself while it runs") {
     CHECK_FALSE(slot.callback.has_value());
 }
 
+namespace {
+
+struct stop_owner;
+
+struct destroy_owner {
+    stop_owner *owner;
+    void operator()() noexcept;
+};
+
+// Members go in reverse order: both callbacks before the source.
+struct stop_owner {
+    lexec::inplace_stop_source source;
+    std::optional<lexec::inplace_stop_callback<destroy_owner>> first;
+    std::optional<lexec::inplace_stop_callback<destroy_owner>> second;
+};
+
+void destroy_owner::operator()() noexcept { delete owner; }
+
+} // namespace
+
+TEST_CASE("a callback may destroy the source running it, with the callbacks yet to run") {
+    auto *const owner = new stop_owner{};
+    owner->first.emplace(owner->source.get_token(), destroy_owner{owner});
+    owner->second.emplace(owner->source.get_token(), destroy_owner{owner});
+    CHECK(owner->source.request_stop());
+}
+
 TEST_CASE("destroying a callback waits while another thread runs it") {
     for (auto iteration = 0; iteration < 500; ++iteration) {
         auto source = lexec::inplace_stop_source{};

@@ -118,6 +118,20 @@ TEST_CASE("a stop requested by the receiver stops every sender") {
     CHECK(log.total() == 1);
 }
 
+// The children complete inside the stop request, and so complete when_all from within
+// its stop source; the stop request must be done with the source by then.
+TEST_CASE("a receiver may destroy when_all as soon as a stop request completes it") {
+    auto source = lexec::inplace_stop_source{};
+    auto log = lexec_test::completion_log{};
+    lexec_test::start_destroyed_on_completion(
+        lexec::write_env(lexec::when_all(lexec_test::until_stopped_sender{}, lexec_test::until_stopped_sender{}),
+                         lexec::prop{lexec::get_stop_token, source.get_token()}),
+        log);
+    source.request_stop();
+    CHECK(log.stopped_count == 1);
+    CHECK(log.total() == 1);
+}
+
 TEST_CASE("a stop requested before start completes with stopped without starting the senders") {
     auto source = lexec::inplace_stop_source{};
     source.request_stop();

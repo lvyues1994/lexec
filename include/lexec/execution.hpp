@@ -33,6 +33,7 @@
 #include <lexec/algorithms/sync_wait.hpp>
 #include <lexec/algorithms/then.hpp>
 #include <lexec/algorithms/when_all.hpp>
+#include <lexec/algorithms/when_any.hpp>
 #include <lexec/algorithms/write_env.hpp>
 
 #include <lexec/scopes/counting_scope.hpp>

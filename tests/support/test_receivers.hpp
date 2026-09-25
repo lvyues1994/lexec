@@ -3,6 +3,7 @@
 #include <lexec/execution.hpp>
 
 #include <type_traits>
+#include <utility>
 
 namespace lexec_test {
 
@@ -38,6 +39,51 @@ struct checked_receiver {
 
     completion_log *log;
 };
+
+// An operation on the heap that its receiver destroys on completion, as spawn does its
+// own: nothing may touch an operation once it has completed.
+template <class Sndr>
+class destroyed_on_completion {
+public:
+    static void start(Sndr sndr, completion_log &log) {
+        lexec::start((new destroyed_on_completion(std::move(sndr), log))->op);
+    }
+
+private:
+    struct receiver {
+        using receiver_concept = lexec::receiver_t;
+
+        template <class... Vs>
+        void set_value(Vs &&...) && noexcept {
+            ++log->value_count;
+            delete self;
+        }
+
+        template <class E>
+        void set_error(E &&) && noexcept {
+            ++log->error_count;
+            delete self;
+        }
+
+        void set_stopped() && noexcept {
+            ++log->stopped_count;
+            delete self;
+        }
+
+        destroyed_on_completion *self;
+        completion_log *log;
+    };
+
+    destroyed_on_completion(Sndr sndr, completion_log &log)
+        : op(lexec::connect(std::move(sndr), receiver{this, &log})) {}
+
+    lexec::connect_result_t<Sndr, receiver> op;
+};
+
+template <class Sndr>
+void start_destroyed_on_completion(Sndr sndr, completion_log &log) {
+    destroyed_on_completion<Sndr>::start(std::move(sndr), log);
+}
 
 template <class Sig, class Sigs>
 inline constexpr bool contains_signature_v = false;

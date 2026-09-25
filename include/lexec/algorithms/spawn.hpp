@@ -163,14 +163,16 @@ template <class Sigs>
 struct spawn_future_state_base {
     using results_type = typename future_results<Sigs>::type;
 
-    enum : unsigned char { completed = 1, consumed = 2, stopped = 4, abandoned = 8 };
+    // While `cancelling`, try_cancel owns what comes of a completion or a consumer: the
+    // spawned operation may complete inside the stop request it makes.
+    enum : unsigned char { completed = 1, consumed = 2, stopped = 4, abandoned = 8, cancelling = 16 };
 
     // The spawned operation has finished and the result is stored.
     void complete() noexcept {
         auto const previous = flags.fetch_or(completed, std::memory_order_acq_rel);
         if ((previous & abandoned) != 0) {
             destroy();
-        } else if ((previous & consumed) != 0) {
+        } else if ((previous & (consumed | cancelling)) == consumed) {
             if ((previous & stopped) == 0) {
                 consumer->deliver(consumer, result);
             }
@@ -182,6 +184,9 @@ struct spawn_future_state_base {
     void consume(future_consumer<Sigs> &waiting) noexcept {
         consumer = &waiting;
         auto const previous = flags.fetch_or(consumed, std::memory_order_acq_rel);
+        if ((previous & cancelling) != 0) {
+            return;
+        }
         if ((previous & completed) != 0) {
             waiting.deliver(&waiting, result);
             destroy();
@@ -190,12 +195,27 @@ struct spawn_future_state_base {
         }
     }
 
-    // A stop request from the consumer: true if the consumer, registered and not yet
-    // given a result, is to complete with stopped itself.
+    // A stop request from the consumer's callback, which runs at most once: true if the
+    // consumer is registered and is to complete with stopped itself.
     bool try_cancel() noexcept {
-        request_stop();
-        auto const previous = flags.fetch_or(stopped, std::memory_order_acq_rel);
-        return (previous & consumed) != 0 and (previous & completed) == 0;
+        auto const before = flags.fetch_or(cancelling, std::memory_order_acq_rel);
+        if ((before & (completed | consumed)) == (completed | consumed)) {
+            // The result is being delivered, once this callback returns.
+            return false;
+        }
+        if ((before & completed) == 0) {
+            request_stop();
+        }
+        // Clears `cancelling`, set above, and sets `stopped`, which only this call sets.
+        auto const previous = flags.fetch_xor(cancelling | stopped, std::memory_order_acq_rel);
+        if ((previous & consumed) == 0) {
+            // consume() is still to come and finds the result or the stop.
+            return false;
+        }
+        if ((previous & completed) != 0) {
+            destroy();
+        }
+        return true;
     }
 
     // The future was dropped: the operation is asked to stop and cleans up on finishing.

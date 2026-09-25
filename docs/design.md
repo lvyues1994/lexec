@@ -172,6 +172,7 @@ struct then_op {
 - `default_domain::apply_sender` 和 `sync_wait` 按 domain 分派尚未实现。
 - 计数作用域的 `join()`：接收者环境没有 `get_start_scheduler` 时，在结束最后一个关联的线程上直接完成；标准此时不能连接。
 - `spawn_future`：消费者收到停止请求时立即以 set_stopped 完成，共享状态在派生的操作完成后才销毁（草案的文字在此处销毁得过早）。
+- `inplace_stop_source::request_stop` 允许正在执行的回调销毁这个 source（连同还没执行的回调），之后不再访问它；co2 的 `stop_source` 也有这一保证，标准没有写。`when_all`、`when_any`、`stop-when`、`any_sender_of` 都按标准的写法把接收者的停止请求转发给操作自己的 source，子操作若在这次请求里同步完成，接收者可以立即销毁整个操作，source 也随之销毁。stdexec 在 `when_all` / `when_any` 里改为转发期间多占一个计数；照此实现时 TSan 发现，这次加一若落在计数归零之后，操作会完成两次，所以这里在 source 一侧解决，转发方只调用 `request_stop`。
 - `parallel_scheduler` 的后端接口以 `lexec::span<std::byte>` 代替 `std::span<std::byte>`：后端是编译进运行时的虚函数，其签名不能随语言模式改变。`receiver_proxy::try_query` 只在接收者的 stop token 本身是 `inplace_stop_token` 时返回它，其余情况返回 `nullopt`（标准允许由实现决定）。关闭异常时，完成签名里没有 `exception_ptr`，后端若报告错误则调用 `std::terminate`。
 - 线程池上的 `bulk` 系列把前驱的值移动存入 op state，向下游发送的是这些衰变后的值（标准允许「值或其衰变副本」）；它的 `bulk_unchunked` 每次领取一批下标，仍逐个下标调用函数，但不保证每个下标各在一个执行代理上（标准对此只是推荐做法）。
 
@@ -285,12 +286,12 @@ lexec/
     - `join()` 异步完成时经接收者的 `get_start_scheduler` 调度；为此新增该查询，`sync_wait` 的环境与 SCHED-ENV 都回答它；
     - `counting_scope` 的 token 以 `stop-when` 包装 sender，实现为操作里的一个 `inplace_stop_source`，作用域的 token 与接收者的 token 都向它请求停止；
     - `associate` 的关联随操作存活，操作销毁后才解除；
-    - `spawn` / `spawn_future` 用环境、sender 环境或 `std::allocator` 中的分配器分配状态，释放内存之后才解除关联；`spawn_future` 的完成、消费、停止、放弃各是一个标志位，每一方都只在自己的 `fetch_or` 之后决定由谁投递结果、由谁销毁状态；
+    - `spawn` / `spawn_future` 用环境、sender 环境或 `std::allocator` 中的分配器分配状态，释放内存之后才解除关联；`spawn_future` 的完成、消费、停止、放弃各是一个标志位，每一方都只在自己的 `fetch_or` 之后决定由谁投递结果、由谁销毁状态；消费者的停止请求另占一个「取消中」位：派生的操作可能就在这次请求里完成，这期间完成方和消费方都只置位，请求返回后由取消方决定结果和状态的去向；
   - `any_sender_of`（`lexec/any_sender_of.hpp`，不在 `execution.hpp` 里），形状与 stdexec 的新接口相同：`any_receiver<Sigs, queries<R(Q) noexcept...>>` 描述擦除后的接收者，`any_sender<AnyReceiver, SenderQueries>` 是擦除后的 sender，`any_scheduler<AnySender, SchedulerQueries>` 是擦除后的调度器，`any_sender_of<Sigs...>` 是只有完成签名的简写：
     - 擦除后的接收者是一个指针加一张静态 vtable，环境只回答列出的查询和 `get_stop_token`（`inplace_stop_token`）；接收者的 token 是 `inplace_stop_token` 时直接传递，不可停止时给空 token，否则由操作里的 stop source 转发；
     - 不超过 4 个指针、nothrow 可移动的 sender 内联存放，否则放在堆上；connect 总要分配一次，因为操作的类型只有被擦除的 sender 知道；
     - `any_scheduler` 同样内联存放调度器，`schedule()` 的 sender 在属性里报告这个 `any_scheduler` 为完成调度器；两个 `any_scheduler` 相等，当且仅当所持调度器类型相同且相等；
-  - `when_any`；
+  - `when_any`，语义与 stdexec 相同：第一个完成的子 sender 胜出，不论哪个通道；它的结果衰变后存入 op state，其余子 sender 被请求停止，全部结束后才把结果交给接收者，接收者此时已请求停止则改为 set_stopped。完成签名是各子 sender 签名衰变后的并集加上 set_stopped，存储结果可能抛异常时再加 `set_error_t(std::exception_ptr)`；环境与 stop source 的转发和 `when_all` 共用；
   - 循环类算法，需要 trampoline 防止同步完成导致栈溢出。
 
   在此之前先完成了与 co2 协程库的桥，见「协程桥」。

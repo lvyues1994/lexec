@@ -62,10 +62,19 @@ protected:
 
 } // namespace detail
 
+// A callback may destroy the source whose request_stop() is running it; request_stop()
+// then returns without touching the source again. Operations that forward stop requests
+// to a source of their own rely on this: their children may complete them, and so have
+// them destroyed, inside the forwarded request.
 struct inplace_stop_source {
     inplace_stop_source() noexcept = default;
     inplace_stop_source(inplace_stop_source &&) = delete;
-    ~inplace_stop_source() { assert(callbacks == nullptr and "inplace_stop_source destroyed with registered callbacks"); }
+    ~inplace_stop_source() {
+        assert(callbacks == nullptr and "inplace_stop_source destroyed with registered callbacks");
+        if (destroyed_during_callback != nullptr) {
+            *destroyed_during_callback = true;
+        }
+    }
 
     inplace_stop_token get_token() const noexcept;
 
@@ -93,6 +102,8 @@ private:
     mutable std::atomic<std::uint8_t> state{0};
     mutable detail::inplace_stop_callback_base *callbacks = nullptr;
     std::thread::id notifying_thread;
+    // Set while request_stop() runs callbacks, on whose thread alone the source may go.
+    bool *destroyed_during_callback = nullptr;
 };
 
 struct inplace_stop_token {
@@ -192,6 +203,8 @@ inline bool inplace_stop_source::request_stop() noexcept {
         return false;
     }
     notifying_thread = std::this_thread::get_id();
+    auto destroyed = false;
+    destroyed_during_callback = &destroyed;
     while (callbacks != nullptr) {
         auto *const callback = callbacks;
         callback->prev_ptr = nullptr;
@@ -204,12 +217,16 @@ inline bool inplace_stop_source::request_stop() noexcept {
         auto removed_during_callback = false;
         callback->removed_during_callback = &removed_during_callback;
         callback->execute();
+        if (destroyed) {
+            return true;
+        }
         if (not removed_during_callback) {
             callback->removed_during_callback = nullptr;
             callback->callback_completed.store(true, std::memory_order_release);
         }
         lock_state();
     }
+    destroyed_during_callback = nullptr;
     state.store(kStopRequestedFlag, std::memory_order_release);
     return true;
 }
