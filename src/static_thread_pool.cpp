@@ -4,8 +4,10 @@
 
 #include <lexec/detail/spin_wait.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -23,6 +25,22 @@ constexpr std::size_t kLocalBlockSize = 8;
 constexpr std::uint32_t kRemotePeriod = 64;
 constexpr int kSpinRounds = 2048;
 constexpr int kPausesPerRound = 4;
+// A bulk job is cut into this many chunks per worker, so that a worker that joins late
+// or runs slow chunks leaves its share to the others.
+constexpr std::size_t kChunksPerWorker = 4;
+
+struct chunk_range {
+    std::size_t begin;
+    std::size_t end;
+};
+
+// The chunk-th of chunk_count near-equal parts of [0, size).
+chunk_range chunk_bounds(std::size_t const size, std::size_t const chunk_count, std::size_t const chunk) noexcept {
+    auto const quotient = size / chunk_count;
+    auto const remainder = size % chunk_count;
+    auto const begin = chunk * quotient + std::min(chunk, remainder);
+    return {begin, begin + quotient + (chunk < remainder ? 1 : 0)};
+}
 
 // A lock-free intrusive stack that only its owner consumes, all of it at once.
 struct remote_queue {
@@ -186,41 +204,54 @@ struct thread_pool_impl {
     // Spins, then sleeps until notified; null once the pool is stopping and drained.
     // Spinning pauses without yielding: a yield is a system call that makes a waiting
     // worker slow to notice work, which is the latency the spinning is there to avoid.
+    // Bulk jobs found meanwhile are joined here, and spinning starts over after them.
     pool_task *wait_for_task(std::uint32_t const index) noexcept {
         auto &self = workers[index];
-        for (auto round = 0; round < kSpinRounds; ++round) {
-            for (auto pause = 0; pause < kPausesPerRound; ++pause) {
-                cpu_relax();
-            }
-            if (auto *const task = find_task(index)) {
-                return task;
-            }
-        }
         while (true) {
-            {
-                auto lock = std::unique_lock<std::mutex>{self.mutex};
-                if (stopping.load(std::memory_order_relaxed)) {
-                    lock.unlock();
-                    return find_task(index);
+            for (auto round = 0; round < kSpinRounds; ++round) {
+                for (auto pause = 0; pause < kPausesPerRound; ++pause) {
+                    cpu_relax();
                 }
-                auto expected = worker_state::running;
-                // A submission since the worker last ran makes this fail: look again.
-                if (self.state.compare_exchange_strong(expected, worker_state::sleeping, std::memory_order_acq_rel)) {
-                    if (auto *const task = take_remote(self)) {
-                        self.state.store(worker_state::running, std::memory_order_relaxed);
-                        return task;
-                    }
-                    sleepers.fetch_add(1, std::memory_order_relaxed);
-                    self.wakeup.wait(lock, [&] {
-                        return self.state.load(std::memory_order_acquire) != worker_state::sleeping or
-                               stopping.load(std::memory_order_relaxed);
-                    });
-                    sleepers.fetch_sub(1, std::memory_order_relaxed);
+                if (join_bulk(index)) {
+                    round = 0;
+                } else if (auto *const task = find_task(index)) {
+                    return task;
                 }
-                self.state.store(worker_state::running, std::memory_order_relaxed);
             }
-            if (auto *const task = find_task(index)) {
-                return task;
+            while (true) {
+                {
+                    auto lock = std::unique_lock<std::mutex>{self.mutex};
+                    if (stopping.load(std::memory_order_relaxed)) {
+                        lock.unlock();
+                        return find_task(index);
+                    }
+                    auto expected = worker_state::running;
+                    // A submission since the worker last ran makes this fail: look again.
+                    if (self.state.compare_exchange_strong(expected, worker_state::sleeping, std::memory_order_acq_rel)) {
+                        if (auto *const task = take_remote(self)) {
+                            self.state.store(worker_state::running, std::memory_order_relaxed);
+                            return task;
+                        }
+                        // A job is listed under the bulk mutex before its publisher looks
+                        // for sleepers: either this sees the job, or the publisher sees
+                        // this worker counted and asleep.
+                        sleepers.fetch_add(1, std::memory_order_relaxed);
+                        if (not has_bulk_job()) {
+                            self.wakeup.wait(lock, [&] {
+                                return self.state.load(std::memory_order_acquire) != worker_state::sleeping or
+                                       stopping.load(std::memory_order_relaxed);
+                            });
+                        }
+                        sleepers.fetch_sub(1, std::memory_order_relaxed);
+                    }
+                    self.state.store(worker_state::running, std::memory_order_relaxed);
+                }
+                if (auto *const task = find_task(index)) {
+                    return task;
+                }
+                if (join_bulk(index)) {
+                    break;
+                }
             }
         }
     }
@@ -229,6 +260,9 @@ struct thread_pool_impl {
         current_worker = current_worker_slot{this, index};
         auto &self = workers[index];
         for (auto executed = std::uint32_t{1};; ++executed) {
+            if (join_bulk(index)) {
+                continue;
+            }
             auto *task = executed % kRemotePeriod == 0 ? take_remote(self) : nullptr;
             if (task == nullptr) {
                 task = find_task(index);
@@ -243,13 +277,114 @@ struct thread_pool_impl {
         }
     }
 
+    // Bulk jobs. The pool lists each job until all its chunks are claimed, and holds a
+    // reference to it meanwhile; each participant holds another while it takes part.
+    // Whoever drops the last reference completes the job, after which nothing touches it.
+
+    bool has_bulk_job() noexcept {
+        auto const lock = std::lock_guard<std::mutex>{bulk_mutex};
+        return bulk_head != nullptr;
+    }
+
+    // Takes part in the oldest listed job; false if there is none.
+    bool join_bulk(std::uint32_t const index) noexcept {
+        if (bulk_front.load(std::memory_order_relaxed) == nullptr) {
+            return false;
+        }
+        pool_bulk_job *job = nullptr;
+        {
+            auto const lock = std::lock_guard<std::mutex>{bulk_mutex};
+            job = bulk_head;
+            if (job == nullptr) {
+                return false;
+            }
+            job->refs.fetch_add(1, std::memory_order_relaxed);
+        }
+        participate(*job, index);
+        return true;
+    }
+
+    void run_bulk(pool_bulk_job &job) noexcept {
+        auto const self = current_worker.pool == this ? current_worker.index : count;
+        job.chunk_count = std::min(job.size, std::size_t{count} * kChunksPerWorker);
+        job.next_chunk.store(0, std::memory_order_relaxed);
+        if (count == 1 or job.chunk_count == 1) {
+            job.run_chunk(&job, 0, job.size);
+            job.complete(&job);
+            return;
+        }
+        job.refs.store(2, std::memory_order_relaxed);
+        {
+            auto const lock = std::lock_guard<std::mutex>{bulk_mutex};
+            job.next = nullptr;
+            if (bulk_tail == nullptr) {
+                bulk_head = &job;
+            } else {
+                bulk_tail->next = &job;
+            }
+            bulk_tail = &job;
+            bulk_front.store(bulk_head, std::memory_order_relaxed);
+        }
+        participate(job, self);
+    }
+
+    // Claims chunks until none are left. Each participant that still sees two unclaimed
+    // chunks wakes one more worker, so waking spreads over the participants.
+    void participate(pool_bulk_job &job, std::uint32_t const self) noexcept {
+        if (job.next_chunk.load(std::memory_order_relaxed) + 1 < job.chunk_count) {
+            wake_idle(self);
+        }
+        auto dropped = std::uint32_t{1};
+        while (true) {
+            auto const chunk = job.next_chunk.fetch_add(1, std::memory_order_relaxed);
+            if (chunk >= job.chunk_count) {
+                // Exactly one participant claims one past the last chunk; it unlists the
+                // job and drops the pool's reference along with its own.
+                if (chunk == job.chunk_count) {
+                    unlist(job);
+                    dropped = 2;
+                }
+                break;
+            }
+            auto const range = chunk_bounds(job.size, job.chunk_count, chunk);
+            job.run_chunk(&job, range.begin, range.end);
+        }
+        // Every participant's chunks happen before the last one's completion.
+        if (job.refs.fetch_sub(dropped, std::memory_order_acq_rel) == dropped) {
+            job.complete(&job);
+        }
+    }
+
+    void unlist(pool_bulk_job &job) noexcept {
+        auto const lock = std::lock_guard<std::mutex>{bulk_mutex};
+        pool_bulk_job *previous = nullptr;
+        auto *current = bulk_head;
+        while (current != &job) {
+            previous = current;
+            current = current->next;
+        }
+        (previous == nullptr ? bulk_head : previous->next) = job.next;
+        if (bulk_tail == &job) {
+            bulk_tail = previous;
+        }
+        bulk_front.store(bulk_head, std::memory_order_relaxed);
+    }
+
     std::unique_ptr<worker[]> workers;
     std::uint32_t count;
     alignas(kCacheLine) std::atomic<std::uint32_t> sleepers{0};
     std::atomic<bool> stopping{false};
+    // Read by every worker on every iteration, and written only when a job is listed or
+    // unlisted, so it gets a line of its own.
+    alignas(kCacheLine) std::atomic<pool_bulk_job *> bulk_front{nullptr};
+    alignas(kCacheLine) std::mutex bulk_mutex;
+    pool_bulk_job *bulk_head = nullptr;
+    pool_bulk_job *bulk_tail = nullptr;
 };
 
 void enqueue(thread_pool_impl &pool, pool_task *const task) noexcept { pool.enqueue(task); }
+
+void run_bulk(thread_pool_impl &pool, pool_bulk_job &job) noexcept { pool.run_bulk(job); }
 
 } // namespace lexec::detail
 

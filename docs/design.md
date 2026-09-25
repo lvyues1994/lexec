@@ -143,8 +143,9 @@ struct then_op {
 必须分配的地方只有以下几处，分配器都取自 `get_allocator(env)`：
 
 - `spawn` / `spawn_future`：op 的生命周期脱离调用者的栈；
-- `any_sender_of`：类型擦除；
-- 线程池上 `bulk` 的分块状态：是否需要，由阶段 4 的基准决定。
+- `any_sender_of`：类型擦除。
+
+线程池上的 `bulk` 不在此列：作业描述符就在 op state 里，见阶段 4。
 
 ## 放弃的方案
 
@@ -169,6 +170,7 @@ struct then_op {
 - 没有 domain 变换时，`connect` 直接连接原 sender；标准的 `default_domain` 会先把右值 sender 移动成一个新值（LWG4368），这里为零拷贝省掉这次移动。公开的 `transform_sender` 仍按标准返回新值。
 - `let_*` 和 `when_all` 对任何完成标签都报告同一个完成 domain（`let_*` 为各个第二 sender 与透传通道的公共 domain，`when_all` 为各子 sender 的公共 domain），没有信息时报告 `default_domain`；标准按完成标签分别计算。
 - `default_domain::apply_sender` 和 `sync_wait` 按 domain 分派尚未实现。
+- 线程池上的 `bulk` 系列把前驱的值移动存入 op state，向下游发送的是这些衰变后的值（标准允许「值或其衰变副本」）；它的 `bulk_unchunked` 每次领取一批下标，仍逐个下标调用函数，但不保证每个下标各在一个执行代理上（标准对此只是推荐做法）。
 
 ## 命名与风格
 
