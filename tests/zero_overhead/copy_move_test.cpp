@@ -18,6 +18,16 @@ TEST_CASE("values produced during execution flow through synchronous adaptors wi
     CHECK(counted::counts.moves == 0);
 }
 
+TEST_CASE("bulk hands values to the function and downstream by reference") {
+    counted::reset();
+    auto const result = lexec::sync_wait(lexec::just() | lexec::then([]() noexcept { return counted{7}; }) |
+                                         lexec::bulk(lexec::par, 3, [](int, counted &c) noexcept { ++c.value; }) |
+                                         lexec::then([](counted &&c) noexcept { return c.value; }));
+    CHECK(std::get<0>(*result) == 10);
+    CHECK(counted::counts.copies == 0);
+    CHECK(counted::counts.moves == 0);
+}
+
 TEST_CASE("sync_wait stores the final value with a single move") {
     counted::reset();
     auto const result = lexec::sync_wait(lexec::just() | lexec::then([]() noexcept { return counted{7}; }));

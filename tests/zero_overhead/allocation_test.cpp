@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -31,6 +32,22 @@ TEST_CASE("a synchronous pipeline allocates nothing") {
                                          lexec::then([](int v) noexcept { return v * 2; }));
     auto const after = lexec_test::allocation_count();
     CHECK(std::get<0>(*result) == 42);
+    CHECK(after == before);
+}
+
+TEST_CASE("bulk on the completing agent allocates nothing") {
+    auto values = std::vector<int>(64);
+    auto const before = lexec_test::allocation_count();
+    lexec::sync_wait(lexec::just() | lexec::bulk(lexec::par, 64, [&values](int i) noexcept {
+                         values[static_cast<std::size_t>(i)] = i;
+                     }) |
+                     lexec::bulk_chunked(lexec::par, 64, [&values](int b, int e) noexcept {
+                         for (; b != e; ++b) {
+                             values[static_cast<std::size_t>(b)] *= 2;
+                         }
+                     }));
+    auto const after = lexec_test::allocation_count();
+    CHECK(values[63] == 126);
     CHECK(after == before);
 }
 

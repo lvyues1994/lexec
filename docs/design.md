@@ -20,6 +20,9 @@ lexec 用 C++17 实现 C++26 最终版 `std::execution` 的接口。用户写 `n
 - **功能范围**：C++26 最终版 `std::execution`，加上 stdexec 的常用扩展 `static_thread_pool`、`when_any`、`any_sender_of`。
 - **优先的性能场景**：CPU 数据并行，以及低延迟任务调度。异步 IO 集成不在本轮范围内。
 - **测试与基准**：doctest + nanobench，都通过 FetchContent 引入，只用于测试和基准目标。
+- **执行策略**：`bulk` 系列接受的 `seq` / `par` / `par_unseq` / `unseq` 取自 `<execution>`，与 `std::execution` 的策略是同一类型；标准库没有提供时（`__cpp_lib_execution` 未定义，或 `unseq` 所需的 C++20），lexec 定义同名的替代类型，定义 `LEXEC_NO_STD_EXECUTION_POLICY` 可强制使用替代类型。代价：
+  - 每个包含 lexec 的编译单元多出约 0.3 s（见 `docs/baselines.md`）；
+  - 装有 TBB 头文件时，libstdc++ 以 TBB 实现 `<execution>`，这时即使只包含该头文件，未优化的程序也要链接 TBB。CMake 在配置时检测这种情况，并让 `lexec::lexec` 链接 `TBB::tbb`；不用 CMake 的用户需要自己链接 TBB。
 
 ## C++17 的约束与补偿
 
@@ -178,7 +181,7 @@ lexec/
   CMakeLists.txt  CMakePresets.json
   cmake/         仅用于自身开发构建的选项
   include/lexec/
-    execution.hpp  stop_token.hpp
+    execution.hpp  execution_policy.hpp  stop_token.hpp
     detail/      config.hpp meta.hpp tuple.hpp spin_wait.hpp manual_variant.hpp
     core/        completion_tags.hpp completion_signatures.hpp env.hpp queries.hpp domain.hpp
                  transform_sender.hpp receiver.hpp operation_state.hpp sender.hpp
@@ -193,7 +196,7 @@ lexec/
   examples/
 ```
 
-- `lexec::lexec`：只含头文件的核心（INTERFACE 目标），零依赖。
+- `lexec::lexec`：只含头文件的核心（INTERFACE 目标），除标准库外没有依赖；标准库以 TBB 实现 `<execution>` 时链接 `TBB::tbb`（见「执行策略」）。
 - `lexec::runtime`：线程池等需要编译的运行时（STATIC 目标），阶段 3 引入。
 - Presets：GCC 和 Clang 各有 debug、release、asan（含 ubsan）、tsan、noexcept 五种。
 - 开发构建通过 `prlimit` 给每个编译器进程设 4 GiB 地址空间上限（`LEXEC_COMPILE_MEMORY_LIMIT`），模板实例化失控时编译报错退出，而不是耗尽机器内存。
@@ -241,8 +244,11 @@ lexec/
 
 **阶段 4：数据并行**
 
-- 内容：`bulk` / `bulk_chunked` / `bulk_unchunked`；线程池通过 domain 定制 `bulk_chunked`，按 worker 数切块，最后完成的块通知下游。
-- 验收：从 1 到 N 线程的扩展性曲线，与手写 `std::thread` 分块以及 stdexec 对比。
+- 内容：
+  - `bulk` / `bulk_chunked` / `bulk_unchunked`：与标准相同，`bulk` 由 `transform_sender` 降级为 `bulk_chunked`，所以定制 `bulk_chunked` 的 domain 也定制了 `bulk`；默认实现在前驱完成的执行代理上运行，`bulk_chunked` 以整个区间调用一次函数，`bulk_unchunked` 逐个下标调用；
+  - 线程池通过 domain 定制 `bulk_chunked` / `bulk_unchunked`，不分配：op state 里只有一个作业描述符，发布到线程池的作业链表；worker 取任务前先加入作业，以原子计数领取分块，发布作业的线程自己也立即参与；作业以引用计数管理，最后离开的线程通知下游，这也保证作业的内存在无人访问之后才可能被释放；前驱的值跨线程时移动一次存入 op state；
+  - `parallel_scheduler`：以 `static_thread_pool` 为默认后端，后端可在链接时替换。
+- 验收：从 1 到 N 线程的扩展性曲线，与手写 `std::thread` 常驻线程加屏障分块以及 stdexec 对比；分块粒度由基准决定。
 
 **阶段 5：结构化并发与边界工具**
 

@@ -2,6 +2,7 @@
 
 #include <lexec/detail/config.hpp>
 
+#include <lexec/execution_policy.hpp>
 #include <lexec/stop_token.hpp>
 
 #include <lexec/core/completion_signatures.hpp>
@@ -19,6 +20,7 @@
 #include <lexec/framework/basic_sender.hpp>
 #include <lexec/framework/sender_adaptor_closure.hpp>
 
+#include <lexec/algorithms/bulk.hpp>
 #include <lexec/algorithms/continues_on.hpp>
 #include <lexec/algorithms/into_variant.hpp>
 #include <lexec/algorithms/just.hpp>

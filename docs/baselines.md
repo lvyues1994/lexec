@@ -30,6 +30,18 @@
 - **`let` 接收者类型的教训**：前驱的接收者最初是 `let_child_receiver<State, Rcvr>`，而 `State` 本身已包含 `Rcvr`，于是接收者类型名每嵌套一层就翻倍。不带 `-g` 时，嵌套 14 层用 473 MiB，20 层超过 4 GiB。改为 `let_child_receiver<SetTag, Sndr, Rcvr>` 后，20 层只用 153 MiB。
 - **编译内存保护**：开发构建通过 `prlimit` 给每个编译器进程设 4 GiB 地址空间上限（`LEXEC_COMPILE_MEMORY_LIMIT`，设为 0 关闭）。同类回归会让那个编译单元报错退出，而不是耗尽机器内存；对最初的 GCC 调试信息问题，编译在 6.4 秒时退出。
 
+## 编译时间（阶段 4）
+
+测量方式同阶段 1。头文件新增 `bulk` 系列，以及取自 `<execution>` 的执行策略。
+
+| 编译器 | `include_only.cpp` `-O0` / `-O0 -g` | `deep_pipeline.cpp` `-O0` / `-O0 -g` | `let_pipeline.cpp` `-O0` / `-O0 -g` |
+|---|---|---|---|
+| GCC 13.3 | 0.46 s / 0.49 s | 1.29 s / 2.30 s | 1.23 s / 1.73 s |
+| Clang 18.1 | 0.43 s / 0.44 s | 1.09 s / 1.71 s | 1.03 s / 1.24 s |
+
+- **增量几乎全部来自 `<execution>`**：定义 `LEXEC_NO_STD_EXECUTION_POLICY`（不包含 `<execution>`，改用 lexec 自己的策略类型）时，`include_only.cpp` 为 GCC 0.16 s、Clang 0.20 s，与阶段 2 相当；包含时为 0.45 s、0.44 s。本机装有 oneTBB 的头文件，libstdc++ 因此以 TBB 实现 `<execution>`，这部分开销也来自 TBB 的头文件。
+- **峰值内存**：GCC `deep_pipeline.cpp -g` 最高，为 485 MiB。
+
 ## 线程池（阶段 3）
 
 测量命令：`cmake --preset gcc-bench`、`cmake --build --preset gcc-bench`，然后 `python3 bench/pool/compare.py build/gcc-bench 5`。两个库各用 8 个 worker 的 `static_thread_pool`，交替各运行 5 次，每项取中位数；stdexec 为提交 `ead186b`，以 C++20 编译。
@@ -71,3 +83,8 @@
 
 - **拷贝与移动**：`continues_on` 和 `when_all` 都是每个值移动 1 次存入操作，0 次拷贝。
 - **堆分配**：在 `static_thread_pool` 上调度、`on` 到另一个线程的 `run_loop` 再回来，都不分配。
+
+## 零开销（阶段 4）
+
+- **拷贝与移动**：`bulk` 系列在前驱完成的执行代理上运行时，值以左值引用交给函数、再以右值引用交给下游，0 次拷贝，0 次移动。
+- **堆分配**：`bulk` 与 `bulk_chunked` 组成的管道不分配。
