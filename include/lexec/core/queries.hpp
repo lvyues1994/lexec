@@ -37,7 +37,7 @@ inline constexpr bool has_try_query_v =
     is_detected_v<query_with_args_t, Q, Tag, Args...> or is_detected_v<query_without_args_t, Q, Tag>;
 
 template <class Tag, class Q, class... Args>
-constexpr decltype(auto) try_query(Q const &q, Args const &...args) noexcept {
+constexpr decltype(auto) try_query(Q const &q, [[maybe_unused]] Args const &...args) noexcept {
     if constexpr (is_detected_v<query_with_args_t, Q, Tag, Args const &...>) {
         static_assert(noexcept(q.query(Tag{}, args...)), "environment queries must be noexcept");
         return q.query(Tag{}, args...);
@@ -119,7 +119,7 @@ struct get_completion_scheduler_t {
               std::enable_if_t<detail::has_try_query_v<Q, get_completion_scheduler_t, Envs const &...> or
                                    (detail::enable_scheduler_v<Q> and sizeof...(Envs) != 0),
                                int> = 0>
-    constexpr auto operator()(Q const &q, Envs const &...envs) const noexcept {
+    constexpr auto operator()(Q const &q, [[maybe_unused]] Envs const &...envs) const noexcept {
         static_assert(sizeof...(Envs) <= 1, "get_completion_scheduler accepts at most one environment");
         if constexpr (detail::has_try_query_v<Q, get_completion_scheduler_t, Envs const &...>) {
             return detail::recurse_completion_scheduler(detail::try_query<get_completion_scheduler_t>(q, envs...),
@@ -137,7 +137,7 @@ namespace detail {
 // RECURSE-QUERY: a scheduler may itself report the scheduler it completes on, such as
 // an inline scheduler reporting the one it was started on; follow that to the end.
 template <class Sch, class... Envs>
-constexpr auto recurse_completion_scheduler(Sch const &sch, Envs const &...envs) noexcept {
+constexpr auto recurse_completion_scheduler(Sch const &sch, [[maybe_unused]] Envs const &...envs) noexcept {
     static_assert(enable_scheduler_v<Sch>, "get_completion_scheduler must return a scheduler");
     using query = get_completion_scheduler_t<set_value_t>;
     if constexpr (not has_try_query_v<Sch, query, Envs const &...>) {

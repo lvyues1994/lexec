@@ -31,10 +31,13 @@ add_library(lexec_dev INTERFACE)
 
 if(MSVC)
     # C4324: padding added for alignas, which the concurrent structures ask for on purpose.
+    # C4702: code the optimizer finds unreachable after inlining a throwing or terminating
+    # call into one instantiation of a template.
     target_compile_options(lexec_dev INTERFACE
-        /W4 /permissive- /Zc:__cplusplus /utf-8 /wd4324
+        /W4 /permissive- /Zc:__cplusplus /utf-8 /wd4324 /wd4702
         $<$<BOOL:${LEXEC_WARNINGS_AS_ERRORS}>:/WX>)
     if(LEXEC_DISABLE_EXCEPTIONS)
+        string(REPLACE "/EHsc" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
         target_compile_options(lexec_dev INTERFACE /EHs-c-)
         target_compile_definitions(lexec_dev INTERFACE _HAS_EXCEPTIONS=0)
     else()

@@ -14,7 +14,7 @@ lexec 用 C++17 实现 C++26 最终版 `std::execution` 的接口。用户写 `n
 
 ## 已确定的决定
 
-- **编译器**：GCC 10+ / Clang 12+ 与 MSVC（Visual Studio 2022）。MSVC 的适配与 Windows CI 任务已加入，但本机无法验证，需推送后由 CI 确认。
+- **编译器**：GCC 10+ / Clang 12+ 与 MSVC（Visual Studio 2022）。MSVC 的全部源文件已在 Compiler Explorer 的 MSVC 19.44 上以 CI 的 Debug、Release、无异常三种选项编译通过；链接和测试运行仍以 Windows CI 为准。
 - **算法实现方式**：从一开始就基于 `basic_sender` 框架。
 - **异常**：同时支持开启异常和 `-fno-exceptions` 两种构建。关闭异常时，所有用户函数按不会抛出处理，完成签名里不出现 `set_error_t(std::exception_ptr)`，也不生成 try/catch。
 - **功能范围**：C++26 最终版 `std::execution`，加上 stdexec 的常用扩展 `static_thread_pool`、`when_any`、`any_sender_of`。
@@ -29,7 +29,7 @@ C++17 是这个模型能成立的最低标准，因为有**保证拷贝消除**�
 - **没有 `std::stop_token`**：自行实现 `inplace_stop_source/token/callback` 和 `never_stop_token`。
 - **没有 consteval 和 constexpr 异常**：completion signatures 在类型层面用 `decltype` 计算。
 - **没有协程**：核心库不含 `task` / `as_awaitable`，将来可提供仅在 C++20 下启用的可选头文件。
-- **`[[no_unique_address]]` 是 C++20 特性**：GCC 和 Clang 在 C++17 模式下作为扩展支持，统一封装为 `LEXEC_NO_UNIQUE_ADDRESS`。Clang 18 在嵌套聚合初始化含这种空成员的类型时会崩溃，所以 `detail::tuple` 对空元素改用空基类优化，只有通过构造函数初始化的成员才使用这个宏。保证拷贝消除不适用于 `[[no_unique_address]]` 成员和基类子对象，所以框架只对空的算法状态使用这个宏；不可移动的状态（如 `let_*` 的状态）以普通成员从 prvalue 原地构造。
+- **`[[no_unique_address]]` 是 C++20 特性**：GCC 和 Clang 在 C++17 模式下作为扩展支持，统一封装为 `LEXEC_NO_UNIQUE_ADDRESS`。Clang 18 在嵌套聚合初始化含这种空成员的类型时会崩溃，所以 `detail::tuple` 对空元素改用空基类优化，只有通过构造函数初始化的成员才使用这个宏。保证拷贝消除不适用于 `[[no_unique_address]]` 成员和基类子对象，所以框架只对空的算法状态使用这个宏；不可移动的状态（如 `let_*` 的状态）以普通成员从 prvalue 原地构造。存放子操作的 `inner_ops` 使用 `LEXEC_IMMOVABLE_NO_UNIQUE_ADDRESS`：MSVC 在 `/O2` 下对这种原地构造的 `[[msvc::no_unique_address]]` 成员会写出对象边界（C4789），所以该宏在 MSVC 上为空。
 
 ## 分层架构
 

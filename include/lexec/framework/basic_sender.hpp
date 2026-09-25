@@ -43,7 +43,7 @@ struct default_impls {
     static constexpr bool connects_children = true;
 
     template <class Data, class... Child>
-    static constexpr auto get_attrs(Data const &, Child const &...child) noexcept {
+    static constexpr auto get_attrs(Data const &, [[maybe_unused]] Child const &...child) noexcept {
         if constexpr (sizeof...(Child) == 1) {
             return make_fwd_env(lexec::get_env(child)...);
         } else {
@@ -188,7 +188,7 @@ struct basic_operation<Sndr, Rcvr, std::index_sequence<Is...>> : basic_state<Snd
         });
     }
 
-    LEXEC_NO_UNIQUE_ADDRESS inner_ops_type inner_ops;
+    LEXEC_IMMOVABLE_NO_UNIQUE_ADDRESS inner_ops_type inner_ops;
 };
 
 // The sender type behind every lexec algorithm: an aggregate of the algorithm's data and

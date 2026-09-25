@@ -35,7 +35,7 @@ constexpr bool is_nothrow_default_transform() noexcept {
 // Applies the transformation the sender's own algorithm tag defines for Tag, if any.
 struct default_domain {
     template <class Tag, class Sndr, class... Env>
-    static constexpr decltype(auto) transform_sender(Tag, Sndr &&sndr, Env const &...env) noexcept(
+    static constexpr decltype(auto) transform_sender(Tag, Sndr &&sndr, [[maybe_unused]] Env const &...env) noexcept(
         detail::is_nothrow_default_transform<Tag, Sndr, Env...>()) {
         static_assert(sizeof...(Env) <= 1, "transform_sender accepts at most one environment");
         if constexpr (detail::is_detected_v<detail::tag_transform_result_t, Tag, Sndr, Env...>) {

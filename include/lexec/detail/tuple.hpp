@@ -73,6 +73,13 @@ struct tuple_impl<std::index_sequence<Is...>, Ts...> : box<Is, Ts>... {
 };
 
 template <class... Ts>
-using tuple = tuple_impl<std::index_sequence_for<Ts...>, Ts...>;
+struct tuple_for {
+    using type = tuple_impl<std::index_sequence_for<Ts...>, Ts...>;
+};
+
+// MSVC crashes (C1001) expanding a dependent pack into an alias template that names the
+// pack twice, as `tuple_impl<std::index_sequence_for<Ts...>, Ts...>` would.
+template <class... Ts>
+using tuple = typename tuple_for<Ts...>::type;
 
 } // namespace lexec::detail

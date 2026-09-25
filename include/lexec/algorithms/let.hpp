@@ -43,7 +43,7 @@ struct sched_env {
 // let-env: where the second sender starts, which is where the predecessor completed
 // with SetTag, as far as the predecessor's attributes tell.
 template <class SetTag, class Attrs, class... Env>
-constexpr auto make_let_env(Attrs const &attrs, Env const &...rcvr_env) noexcept {
+constexpr auto make_let_env([[maybe_unused]] Attrs const &attrs, [[maybe_unused]] Env const &...rcvr_env) noexcept {
     if constexpr (is_detected_v<completion_scheduler_result_t, SetTag, Attrs, fwd_env_t<Env>...>) {
         using scheduler = completion_scheduler_result_t<SetTag, Attrs, fwd_env_t<Env>...>;
         return sched_env<scheduler>{get_completion_scheduler<SetTag>(attrs, make_fwd_env(rcvr_env)...)};

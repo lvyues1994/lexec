@@ -121,12 +121,21 @@ struct child_values_storage {
                           manual_variant>;
 };
 
+template <class ErrorSig>
+struct error_type;
+
+template <class E>
+struct error_type<set_error_t(E)> {
+    using type = E;
+};
+
 template <class ErrorSigs>
 struct error_types;
 
-template <class... Es>
-struct error_types<completion_signatures<set_error_t(Es)...>> {
-    using type = type_list<Es...>;
+// MSVC does not match `completion_signatures<set_error_t(Es)...>` against an empty list.
+template <class... ErrorSigs>
+struct error_types<completion_signatures<ErrorSigs...>> {
+    using type = type_list<typename error_type<ErrorSigs>::type...>;
 };
 
 enum class when_all_disposition : unsigned char { started, error, stopped };

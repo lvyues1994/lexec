@@ -34,3 +34,12 @@
 #ifndef LEXEC_NO_UNIQUE_ADDRESS
 #define LEXEC_NO_UNIQUE_ADDRESS
 #endif
+
+// For members holding operation states constructed in place from connect's prvalue.
+// At /O2, MSVC writes past the enclosing object when such a member is
+// [[msvc::no_unique_address]] (C4789).
+#if defined(_MSC_VER) && !defined(__clang__)
+#define LEXEC_IMMOVABLE_NO_UNIQUE_ADDRESS
+#else
+#define LEXEC_IMMOVABLE_NO_UNIQUE_ADDRESS LEXEC_NO_UNIQUE_ADDRESS
+#endif
