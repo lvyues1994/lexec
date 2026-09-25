@@ -46,6 +46,16 @@ static_assert(std::is_same_v<decltype(lexec::get_completion_domain<>(then_attrs{
 using let_attrs = lexec::env_of_t<decltype(lexec::just(1) | lexec::let_value(just_again))>;
 static_assert(not std::is_invocable_v<get_completion_domain_t<>, let_attrs, domain_env_t>);
 
+// COMMON-DOMAIN: the one domain all are, or an indeterminate domain listing each once;
+// indeterminate_domain<> means no information and joins with anything.
+struct other_domain {};
+static_assert(std::is_same_v<lexec::common_domain_t<test_domain, test_domain>, test_domain>);
+static_assert(std::is_same_v<lexec::common_domain_t<test_domain, other_domain, test_domain>,
+                             lexec::indeterminate_domain<test_domain, other_domain>>);
+static_assert(std::is_same_v<lexec::common_domain_t<lexec::indeterminate_domain<>, test_domain>, test_domain>);
+static_assert(std::is_same_v<lexec::common_domain_t<lexec::indeterminate_domain<test_domain, other_domain>, other_domain>,
+                             lexec::indeterminate_domain<test_domain, other_domain>>);
+
 // Without the environment it will be started in, an inline sender cannot tell where it completes.
 static_assert(not std::is_invocable_v<lexec::get_completion_scheduler_t<set_value_t>, just_attrs>);
 

@@ -45,6 +45,10 @@ using default_set_value = completion_signatures<set_value_t(Vs...)>;
 template <class E>
 using default_set_error = completion_signatures<set_error_t(E)>;
 
+// A transform that drops the signatures of its channel.
+template <class...>
+using no_signatures = completion_signatures<>;
+
 // Applies the transform for Tag's channel to Sig, or yields no signatures when Sig
 // belongs to another channel.
 template <class Tag, class Sig, template <class...> class SetValue, template <class> class SetError, class SetStopped>

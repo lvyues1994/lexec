@@ -72,6 +72,22 @@ struct default_impls {
     }
 };
 
+template <class Self>
+struct completions_after_lowering {};
+
+// An algorithm that exists only until transform_sender lowers it, which connect always
+// does; without an environment to lower in, its senders are dependent.
+struct lowered_impls : default_impls {
+    template <class Self, class... Env>
+    using completions = typename completions_after_lowering<Self>::type;
+
+    template <class Sndr, class Rcvr>
+    static no_data get_state(Sndr &&, Rcvr &) noexcept {
+        static_assert(dependent_false<Sndr>, "this lexec algorithm must be connected with lexec::connect, which lowers it");
+        return {};
+    }
+};
+
 template <class Sndr, class Rcvr>
 using get_state_result_t =
     decltype(impls_for<tag_of_t<Sndr>>::get_state(std::declval<Sndr>(), std::declval<Rcvr &>()));

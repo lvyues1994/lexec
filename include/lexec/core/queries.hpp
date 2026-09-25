@@ -81,8 +81,32 @@ struct get_stop_token_t {
 };
 
 struct get_allocator_t : detail::required_query<get_allocator_t> {};
-struct get_scheduler_t : detail::required_query<get_scheduler_t> {};
 struct get_delegation_scheduler_t : detail::required_query<get_delegation_scheduler_t> {};
+
+struct get_scheduler_t;
+struct get_domain_t;
+
+namespace detail {
+
+// HIDE-SCHED: the environment without its scheduler and domain, so that asking the
+// current scheduler about itself cannot recurse back into the environment.
+template <class Env>
+struct hide_sched_env {
+    template <class Query, class... Args,
+              std::enable_if_t<not is_one_of_v<Query, get_scheduler_t, get_domain_t> and
+                                   has_query_v<Env const &, Query, Args...>,
+                               int> = 0>
+    constexpr decltype(auto) query(Query query_tag, Args &&...args) const noexcept {
+        return target->query(query_tag, static_cast<Args &&>(args)...);
+    }
+
+    Env const *target;
+};
+
+template <class Sch, class... Envs>
+constexpr auto recurse_completion_scheduler(Sch const &sch, Envs const &...envs) noexcept;
+
+} // namespace detail
 
 // Asks a sender's attributes where it completes. The optional environment is the
 // receiver's, for senders that complete wherever they are started. A scheduler asked
@@ -98,10 +122,41 @@ struct get_completion_scheduler_t {
     constexpr auto operator()(Q const &q, Envs const &...envs) const noexcept {
         static_assert(sizeof...(Envs) <= 1, "get_completion_scheduler accepts at most one environment");
         if constexpr (detail::has_try_query_v<Q, get_completion_scheduler_t, Envs const &...>) {
-            return detail::try_query<get_completion_scheduler_t>(q, envs...);
+            return detail::recurse_completion_scheduler(detail::try_query<get_completion_scheduler_t>(q, envs...),
+                                                        envs...);
         } else {
             return q;
         }
+    }
+
+    static constexpr bool query(forwarding_query_t) noexcept { return true; }
+};
+
+namespace detail {
+
+// RECURSE-QUERY: a scheduler may itself report the scheduler it completes on, such as
+// an inline scheduler reporting the one it was started on; follow that to the end.
+template <class Sch, class... Envs>
+constexpr auto recurse_completion_scheduler(Sch const &sch, Envs const &...envs) noexcept {
+    static_assert(enable_scheduler_v<Sch>, "get_completion_scheduler must return a scheduler");
+    using query = get_completion_scheduler_t<set_value_t>;
+    if constexpr (not has_try_query_v<Sch, query, Envs const &...>) {
+        return sch;
+    } else if constexpr (std::is_same_v<try_query_result_t<query, Sch, Envs...>, Sch>) {
+        return try_query<query>(sch, envs...);
+    } else {
+        return recurse_completion_scheduler(try_query<query>(sch, envs...), envs...);
+    }
+}
+
+} // namespace detail
+
+// The environment's scheduler, or rather the scheduler work started on it completes on.
+struct get_scheduler_t {
+    template <class Env, std::enable_if_t<detail::has_query_v<Env const &, get_scheduler_t>, int> = 0>
+    constexpr auto operator()(Env const &env) const noexcept {
+        static_assert(noexcept(env.query(get_scheduler_t{})), "environment queries must be noexcept");
+        return get_completion_scheduler_t<set_value_t>{}(env.query(get_scheduler_t{}), detail::hide_sched_env<Env>{&env});
     }
 
     static constexpr bool query(forwarding_query_t) noexcept { return true; }

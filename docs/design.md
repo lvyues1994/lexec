@@ -166,7 +166,6 @@ struct then_op {
 - `then` / `upon_error` / `upon_stopped` 直接调用函数对象，暂不支持成员指针；标准使用 `std::invoke`。
 - 没有 domain 变换时，`connect` 直接连接原 sender；标准的 `default_domain` 会先把右值 sender 移动成一个新值（LWG4368），这里为零拷贝省掉这次移动。公开的 `transform_sender` 仍按标准返回新值。
 - `let_*` 不声明完成调度器和完成 domain；标准会计算各个第二 sender 完成 domain 的公共 domain，这需要 `indeterminate_domain`，阶段 3 随 `when_all` 加入。
-- `get_completion_scheduler` 暂不实现 `RECURSE-QUERY`，`get_scheduler` 也不再询问调度器自己的完成调度器；两者只影响 `inline_scheduler` 这类在别处完成的调度器，阶段 3 随它加入。
 - `default_domain::apply_sender` 和 `sync_wait` 按 domain 分派尚未实现。
 
 ## 命名与风格

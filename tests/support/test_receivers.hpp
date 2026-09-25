@@ -39,6 +39,23 @@ struct checked_receiver {
     completion_log *log;
 };
 
+template <class Sig, class Sigs>
+inline constexpr bool contains_signature_v = false;
+
+template <class Sig, class... Sigs>
+inline constexpr bool contains_signature_v<Sig, lexec::completion_signatures<Sigs...>> =
+    lexec::detail::is_one_of_v<Sig, Sigs...>;
+
+// Equality of two sets of completion signatures, whatever their order.
+template <class Expected, class Actual>
+inline constexpr bool same_signature_set_v = false;
+
+template <class... Expected, class... Actual>
+inline constexpr bool same_signature_set_v<lexec::completion_signatures<Expected...>,
+                                           lexec::completion_signatures<Actual...>> =
+    sizeof...(Expected) == sizeof...(Actual) and
+    (contains_signature_v<Expected, lexec::completion_signatures<Actual...>> and ...);
+
 struct lifetime_counts {
     int copies = 0;
     int moves = 0;

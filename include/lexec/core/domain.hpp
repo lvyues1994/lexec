@@ -47,6 +47,64 @@ struct default_domain {
     }
 };
 
+namespace detail {
+
+template <class Domain, class Tag, class Sndr, class Env>
+using own_transform_result_t =
+    decltype(std::declval<Domain>().transform_sender(Tag{}, std::declval<Sndr>(), std::declval<Env const &>()));
+
+template <class Domain, class Tag, class Sndr, class Env, bool = is_detected_v<own_transform_result_t, Domain, Tag, Sndr, Env>>
+inline constexpr bool agrees_with_default_v = true;
+
+template <class Domain, class Tag, class Sndr, class Env>
+inline constexpr bool agrees_with_default_v<Domain, Tag, Sndr, Env, true> =
+    std::is_same_v<remove_cvref_t<own_transform_result_t<Domain, Tag, Sndr, Env>>,
+                   remove_cvref_t<own_transform_result_t<default_domain, Tag, Sndr, Env>>>;
+
+} // namespace detail
+
+// The domain of a sender that may complete in any of several domains: it transforms as
+// default_domain does, which each of those domains must agree with.
+template <class... Domains>
+struct indeterminate_domain {
+    template <class Tag, class Sndr, class Env>
+    static constexpr decltype(auto) transform_sender(Tag, Sndr &&sndr, Env const &env) noexcept(
+        detail::is_nothrow_default_transform<Tag, Sndr, Env>()) {
+        static_assert((detail::agrees_with_default_v<Domains, Tag, Sndr, Env> and ...),
+                      "a sender that may complete in several domains is transformed differently by one of them");
+        return default_domain::transform_sender(Tag{}, static_cast<Sndr &&>(sndr), env);
+    }
+};
+
+namespace detail {
+
+template <class Domain>
+struct domain_components {
+    using type = type_list<Domain>;
+};
+
+template <class... Domains>
+struct domain_components<indeterminate_domain<Domains...>> {
+    using type = type_list<Domains...>;
+};
+
+template <class Components>
+struct common_domain_of {
+    using type = rename_t<Components, indeterminate_domain>;
+};
+
+template <class Domain>
+struct common_domain_of<type_list<Domain>> {
+    using type = Domain;
+};
+
+} // namespace detail
+
+// COMMON-DOMAIN: the one domain all of Domains are, or an indeterminate_domain of them.
+template <class... Domains>
+using common_domain_t = typename detail::common_domain_of<
+    detail::unique_t<detail::concat_t<detail::type_list<>, typename detail::domain_components<Domains>::type...>>>::type;
+
 struct get_domain_t;
 
 template <class Tag = void>
@@ -56,21 +114,6 @@ namespace detail {
 
 template <class>
 struct domain_not_found {};
-
-// HIDE-SCHED: the environment without its scheduler and domain, so that asking the
-// current scheduler for its domain cannot recurse into get_domain.
-template <class Env>
-struct hide_sched_env {
-    template <class Query, class... Args,
-              std::enable_if_t<not is_one_of_v<Query, get_scheduler_t, get_domain_t> and
-                                   has_query_v<Env const &, Query, Args...>,
-                               int> = 0>
-    constexpr decltype(auto) query(Query query_tag, Args &&...args) const noexcept {
-        return target->query(query_tag, static_cast<Args &&>(args)...);
-    }
-
-    Env const *target;
-};
 
 template <class Tag, class Q, class... Envs>
 using completion_scheduler_result_t =

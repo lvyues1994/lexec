@@ -20,17 +20,11 @@ struct into_variant_t;
 
 namespace detail {
 
-// Only the elements' construction can throw; the standard leaves the noexcept of the
-// variant and tuple constructors unspecified.
-template <class... Vs>
-using is_nothrow_decay_copyable_t = std::bool_constant<(std::is_nothrow_constructible_v<std::decay_t<Vs>, Vs> and ...)>;
-
-template <class...>
-using no_signatures = completion_signatures<>;
-
 template <class ChildSigs>
 struct into_variant_completions {
     using variant_type = gather_signatures_t<set_value_t, ChildSigs, decayed_tuple, lexec::variant_or_empty>;
+    // Only the elements' construction can throw; the standard leaves the noexcept of the
+    // variant and tuple constructors unspecified.
     static constexpr bool nothrow =
         gather_signatures_t<set_value_t, ChildSigs, is_nothrow_decay_copyable_t, all_of_t>::value;
     using type = transform_completion_signatures<

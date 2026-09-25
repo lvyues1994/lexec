@@ -52,6 +52,14 @@ struct manual_variant {
         return *std::launder(reinterpret_cast<T *>(storage));
     }
 
+    // Calls fn with the active object; there must be one.
+    template <class Fn>
+    void visit(Fn &&fn) noexcept {
+        assert(active != kEmpty and "manual_variant: no active alternative to visit");
+        static_cast<void>(
+            ((active == index_in_pack<Ts, Ts...>() ? (static_cast<Fn &&>(fn)(get<Ts>()), true) : false) or ...));
+    }
+
     void reset() noexcept {
         [[maybe_unused]] auto const current = active;
         active = kEmpty;

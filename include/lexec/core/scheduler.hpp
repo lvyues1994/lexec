@@ -40,23 +40,18 @@ using equality_probe_t = std::enable_if_t<std::is_convertible_v<decltype(std::de
                                                                          std::declval<Sch const &>()),
                                                                 bool>>;
 
-template <class Sch>
-using completion_scheduler_of_schedule_t =
-    remove_cvref_t<decltype(get_completion_scheduler<set_value_t>(get_env(schedule(std::declval<Sch>()))))>;
-
 template <class Sch, bool = is_detected_v<scheduler_concept_of_t, Sch> and is_detected_v<schedule_member_t, Sch>>
 inline constexpr bool is_scheduler_impl_v = false;
 
 template <class Sch>
 inline constexpr bool is_scheduler_impl_v<Sch, true> =
     std::is_base_of_v<scheduler_t, typename Sch::scheduler_concept> and is_sender_v<schedule_result_t<Sch>> and
-    std::is_same_v<detected_or_t<void, completion_scheduler_of_schedule_t, Sch>, Sch> and
     is_detected_v<equality_probe_t, Sch> and std::is_copy_constructible_v<Sch>;
 
 } // namespace detail
 
-// The sender returned by schedule() must report the scheduler itself as its value
-// completion scheduler.
+// Where the sender returned by schedule() completes is a semantic requirement only: an
+// inline scheduler completes wherever it is started, which only the receiver knows.
 template <class Sch>
 inline constexpr bool is_scheduler_v = detail::is_scheduler_impl_v<detail::remove_cvref_t<Sch>>;
 

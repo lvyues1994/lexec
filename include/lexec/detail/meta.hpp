@@ -26,6 +26,9 @@ inline constexpr bool is_one_of_v = (std::is_same_v<T, Ts> or ...);
 template <class... Checks>
 using all_of_t = std::bool_constant<(Checks::value and ...)>;
 
+template <class... Ts>
+using is_nothrow_decay_copyable_t = std::bool_constant<(std::is_nothrow_constructible_v<std::decay_t<Ts>, Ts> and ...)>;
+
 // Detection idiom: whether Op<Args...> names a valid type.
 template <class AlwaysVoid, template <class...> class Op, class... Args>
 struct detector : std::false_type {};

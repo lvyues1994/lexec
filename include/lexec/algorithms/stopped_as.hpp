@@ -57,23 +57,6 @@ struct just_error_fn {
     E err;
 };
 
-template <class Self>
-struct completions_after_lowering {};
-
-// These algorithms exist only until transform_sender lowers them, which connect always
-// does; without an environment to lower in, they are dependent.
-struct lowered_impls : default_impls {
-    template <class Self, class... Env>
-    using completions = typename completions_after_lowering<Self>::type;
-
-    template <class Sndr, class Rcvr>
-    static no_data get_state(Sndr &&, Rcvr &) noexcept {
-        static_assert(dependent_false<Sndr>, "lexec::stopped_as_optional/stopped_as_error must be connected with "
-                                             "lexec::connect, which lowers them");
-        return {};
-    }
-};
-
 template <>
 struct impls_for<stopped_as_optional_t> : lowered_impls {};
 

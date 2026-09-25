@@ -1,4 +1,5 @@
 #include "../support/allocation_counter.hpp"
+#include "../support/loop_thread.hpp"
 
 #include <lexec/execution.hpp>
 
@@ -36,6 +37,17 @@ TEST_CASE("let, into_variant, and stopped_as_optional allocate nothing") {
                                          lexec::stopped_as_optional | lexec::into_variant);
     auto const after = lexec_test::allocation_count();
     CHECK(*std::get<0>(std::get<0>(std::get<0>(*result))) == 42);
+    CHECK(after == before);
+}
+
+TEST_CASE("moving work to another thread's scheduler and back allocates nothing") {
+    auto other = lexec_test::loop_thread{};
+    auto const before = lexec_test::allocation_count();
+    auto const result = lexec::sync_wait(
+        lexec::on(other.scheduler(), lexec::just(20) | lexec::then([](int v) noexcept { return v + 22; })) |
+        lexec::continues_on(lexec::inline_scheduler{}));
+    auto const after = lexec_test::allocation_count();
+    CHECK(std::get<0>(*result) == 42);
     CHECK(after == before);
 }
 

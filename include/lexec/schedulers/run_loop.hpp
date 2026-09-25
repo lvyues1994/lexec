@@ -46,8 +46,8 @@ struct run_loop_scheduler {
 };
 
 struct run_loop_attrs {
-    template <class Tag, std::enable_if_t<is_one_of_v<Tag, set_value_t, set_stopped_t>, int> = 0>
-    run_loop_scheduler query(get_completion_scheduler_t<Tag>) const noexcept {
+    template <class Tag, class... Env, std::enable_if_t<is_one_of_v<Tag, set_value_t, set_stopped_t>, int> = 0>
+    run_loop_scheduler query(get_completion_scheduler_t<Tag>, Env const &...) const noexcept {
         return run_loop_scheduler{loop};
     }
 
