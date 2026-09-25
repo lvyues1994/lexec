@@ -116,7 +116,11 @@
     { "name": "clang-asan", "configurePreset": "clang-asan" },
     { "name": "clang-tsan", "configurePreset": "clang-tsan" },
     { "name": "clang-noexcept", "configurePreset": "clang-noexcept" },
-    { "name": "gcc-bench", "configurePreset": "gcc-bench", "targets": ["lexec_pool_bench", "stdexec_pool_bench"] },
+    {
+      "name": "gcc-bench",
+      "configurePreset": "gcc-bench",
+      "targets": ["lexec_pool_bench", "stdexec_pool_bench", "lexec_bulk_bench", "stdexec_bulk_bench", "manual_bulk_bench"]
+    },
     { "name": "msvc-debug", "configurePreset": "msvc", "configuration": "Debug" },
     { "name": "msvc-release", "configurePreset": "msvc", "configuration": "Release" },
     { "name": "msvc-noexcept", "configurePreset": "msvc-noexcept", "configuration": "Debug" }

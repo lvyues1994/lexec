@@ -22,4 +22,19 @@ if(LEXEC_BUILD_BENCHMARKS)
     set_target_properties(stdexec_pool_bench PROPERTIES CXX_STANDARD 20)
     target_include_directories(stdexec_pool_bench SYSTEM PRIVATE "${stdexec_SOURCE_DIR}/include")
     target_link_libraries(stdexec_pool_bench PRIVATE Threads::Threads)
+
+    add_executable(lexec_bulk_bench bulk/lexec_bulk_bench.cpp)
+    target_link_libraries(lexec_bulk_bench PRIVATE lexec::runtime lexec_dev)
+
+    add_executable(stdexec_bulk_bench bulk/stdexec_bulk_bench.cpp)
+    set_target_properties(stdexec_bulk_bench PROPERTIES CXX_STANDARD 20)
+    target_include_directories(stdexec_bulk_bench SYSTEM PRIVATE "${stdexec_SOURCE_DIR}/include")
+    target_link_libraries(stdexec_bulk_bench PRIVATE Threads::Threads)
+    # stdexec takes its execution policies from <execution> too.
+    if(LEXEC_EXECUTION_USES_TBB AND TARGET TBB::tbb)
+        target_link_libraries(stdexec_bulk_bench PRIVATE TBB::tbb)
+    endif()
+
+    add_executable(manual_bulk_bench bulk/manual_bulk_bench.cpp)
+    target_link_libraries(manual_bulk_bench PRIVATE lexec_dev Threads::Threads)
 endif()

@@ -194,7 +194,7 @@ lexec/
     schedulers/  run_loop.hpp inline_scheduler.hpp static_thread_pool.hpp
   src/           static_thread_pool.cpp bwos_queue.hpp（运行时库的私有实现）
   tests/         按层组织，含 static_assert 编译期测试、头文件自包含检查和 -O2 汇编比对
-  bench/         编译时间探针；pool/ 下为与 stdexec 对比的线程池基准（stdexec 版以 C++20 编译）
+  bench/         编译时间探针；pool/ 与 bulk/ 下为与 stdexec 对比的线程池和数据并行基准（stdexec 版以 C++20 编译），bulk/ 另含手写线程组作参照
   examples/
 ```
 
@@ -248,7 +248,7 @@ lexec/
 
 - 内容：
   - `bulk` / `bulk_chunked` / `bulk_unchunked`：与标准相同，`bulk` 由 `transform_sender` 降级为 `bulk_chunked`，所以定制 `bulk_chunked` 的 domain 也定制了 `bulk`；默认实现在前驱完成的执行代理上运行，`bulk_chunked` 以整个区间调用一次函数，`bulk_unchunked` 逐个下标调用；
-  - 线程池通过 domain 定制 `bulk_chunked` / `bulk_unchunked`，不分配：op state 里只有一个作业描述符，发布到线程池的作业链表；worker 取任务前先加入作业，以原子计数领取分块，发布作业的线程自己也立即参与；作业以引用计数管理，最后离开的线程通知下游，这也保证作业的内存在无人访问之后才可能被释放；前驱的值跨线程时移动一次存入 op state；
+  - 线程池通过 domain 定制 `bulk_chunked` / `bulk_unchunked`，不分配：op state 里只有一个作业描述符，发布到线程池的作业链表；作业切成 min(元素数, 4×worker 数) 块，worker 取任务前先加入还有分块可领的作业，以原子计数领取分块，发布作业的线程自己也立即参与；作业以引用计数管理，最后离开的线程通知下游，这也保证作业的内存在无人访问之后才可能被释放；前驱的值跨线程时移动一次存入 op state；自旋中的 worker 每轮只从 2 个对象窃取，以便尽快看到新作业；
   - `parallel_scheduler`：以 `static_thread_pool` 为默认后端，后端可在链接时替换。
 - 验收：从 1 到 N 线程的扩展性曲线，与手写 `std::thread` 常驻线程加屏障分块以及 stdexec 对比；分块粒度由基准决定。
 

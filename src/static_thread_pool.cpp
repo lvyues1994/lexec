@@ -25,6 +25,7 @@ constexpr std::size_t kLocalBlockSize = 8;
 constexpr std::uint32_t kRemotePeriod = 64;
 constexpr int kSpinRounds = 2048;
 constexpr int kPausesPerRound = 4;
+constexpr std::uint32_t kSpinStealAttempts = 2;
 // A bulk job is cut into this many chunks per worker, so that a worker that joins late
 // or runs slow chunks leaves its share to the others.
 constexpr std::size_t kChunksPerWorker = 4;
@@ -182,7 +183,9 @@ struct thread_pool_impl {
         return task;
     }
 
-    pool_task *find_task(std::uint32_t const index) noexcept {
+    // A spinning worker steals from few victims per round, so that it gets back soon to
+    // its own submissions and to bulk jobs.
+    pool_task *find_task(std::uint32_t const index, std::uint32_t const steal_attempts) noexcept {
         auto &self = workers[index];
         if (auto *const task = self.local.pop_back()) {
             return task;
@@ -190,7 +193,7 @@ struct thread_pool_impl {
         if (auto *const task = take_remote(self)) {
             return task;
         }
-        for (auto attempt = std::uint32_t{0}; attempt < 2 * count; ++attempt) {
+        for (auto attempt = std::uint32_t{0}; attempt < steal_attempts; ++attempt) {
             auto const victim = next_random(self.random_state) % count;
             if (victim != index) {
                 if (auto *const task = workers[victim].local.steal_front()) {
@@ -214,7 +217,7 @@ struct thread_pool_impl {
                 }
                 if (join_bulk(index)) {
                     round = 0;
-                } else if (auto *const task = find_task(index)) {
+                } else if (auto *const task = find_task(index, kSpinStealAttempts)) {
                     return task;
                 }
             }
@@ -223,7 +226,7 @@ struct thread_pool_impl {
                     auto lock = std::unique_lock<std::mutex>{self.mutex};
                     if (stopping.load(std::memory_order_relaxed)) {
                         lock.unlock();
-                        return find_task(index);
+                        return find_task(index, 2 * count);
                     }
                     auto expected = worker_state::running;
                     // A submission since the worker last ran makes this fail: look again.
@@ -246,7 +249,7 @@ struct thread_pool_impl {
                     }
                     self.state.store(worker_state::running, std::memory_order_relaxed);
                 }
-                if (auto *const task = find_task(index)) {
+                if (auto *const task = find_task(index, 2 * count)) {
                     return task;
                 }
                 if (join_bulk(index)) {
@@ -265,7 +268,7 @@ struct thread_pool_impl {
             }
             auto *task = executed % kRemotePeriod == 0 ? take_remote(self) : nullptr;
             if (task == nullptr) {
-                task = find_task(index);
+                task = find_task(index, 2 * count);
             }
             if (task == nullptr) {
                 task = wait_for_task(index);
@@ -281,12 +284,22 @@ struct thread_pool_impl {
     // reference to it meanwhile; each participant holds another while it takes part.
     // Whoever drops the last reference completes the job, after which nothing touches it.
 
-    bool has_bulk_job() noexcept {
-        auto const lock = std::lock_guard<std::mutex>{bulk_mutex};
-        return bulk_head != nullptr;
+    // The oldest listed job that still has chunks to claim, with bulk_mutex held. A listed
+    // job is alive, since the list holds a reference to it.
+    pool_bulk_job *joinable_job() const noexcept {
+        auto *job = bulk_head;
+        while (job != nullptr and job->next_chunk.load(std::memory_order_relaxed) >= job->chunk_count) {
+            job = job->next;
+        }
+        return job;
     }
 
-    // Takes part in the oldest listed job; false if there is none.
+    bool has_bulk_job() noexcept {
+        auto const lock = std::lock_guard<std::mutex>{bulk_mutex};
+        return joinable_job() != nullptr;
+    }
+
+    // Takes part in a job that still has chunks to claim; false if there is none.
     bool join_bulk(std::uint32_t const index) noexcept {
         if (bulk_front.load(std::memory_order_relaxed) == nullptr) {
             return false;
@@ -294,7 +307,7 @@ struct thread_pool_impl {
         pool_bulk_job *job = nullptr;
         {
             auto const lock = std::lock_guard<std::mutex>{bulk_mutex};
-            job = bulk_head;
+            job = joinable_job();
             if (job == nullptr) {
                 return false;
             }
