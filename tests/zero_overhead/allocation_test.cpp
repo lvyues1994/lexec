@@ -1,6 +1,7 @@
 #include "../support/allocation_counter.hpp"
 #include "../support/loop_thread.hpp"
 
+#include <lexec/any_sender_of.hpp>
 #include <lexec/execution.hpp>
 
 #include <doctest/doctest.h>
@@ -128,6 +129,17 @@ TEST_CASE("scheduling and bulk work on the parallel scheduler allocate nothing")
     auto const after = lexec_test::allocation_count();
     CHECK(values[4095] == 4095);
     CHECK(after == before);
+}
+
+TEST_CASE("an any_sender stores a small sender inline and allocates only its operation") {
+    auto const before = lexec_test::allocation_count();
+    lexec::any_sender_of<lexec::set_value_t(int)> erased = lexec::just(7);
+    auto const constructed = lexec_test::allocation_count();
+    auto const result = lexec::sync_wait(std::move(erased));
+    auto const after = lexec_test::allocation_count();
+    CHECK(std::get<0>(*result) == 7);
+    CHECK(constructed == before);
+    CHECK(after - constructed == 1);
 }
 
 TEST_CASE("the allocation counter observes allocations") {

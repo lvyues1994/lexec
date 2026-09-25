@@ -110,6 +110,10 @@
 - **拷贝与移动**：`continues_on` 和 `when_all` 都是每个值移动 1 次存入操作，0 次拷贝。
 - **堆分配**：在 `static_thread_pool` 上调度、`on` 到另一个线程的 `run_loop` 再回来，都不分配。
 
+## 类型擦除（阶段 5）
+
+- **堆分配**（`tests/zero_overhead/allocation_test.cpp`）：`any_sender_of<set_value_t(int)> s = just(7)` 构造时不分配（sender 内联存放），`sync_wait(std::move(s))` 恰好分配一次，即被擦除的操作。
+
 ## 零开销（协程桥）
 
 以下由 `tests/coro/allocation_test.cpp` 检查（`lexec_coro_tests`，sanitizer 构建中不运行）：

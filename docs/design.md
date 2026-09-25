@@ -143,7 +143,7 @@ struct then_op {
 必须分配的地方只有以下几处，分配器都取自 `get_allocator(env)`：
 
 - `spawn` / `spawn_future`：op 的生命周期脱离调用者的栈；
-- `any_sender_of`：类型擦除。
+- `any_sender_of`：类型擦除。不超过 4 个指针且移动不抛异常的 sender 内联保存，构造时不分配；`connect` 时被擦除 sender 的操作类型只有它自己知道，因此分配一次。
 
 线程池上的 `bulk` 不在此列：作业描述符就在 op state 里，见阶段 4。
 
@@ -200,7 +200,7 @@ lexec/
   CMakeLists.txt  CMakePresets.json
   cmake/         仅用于自身开发构建的选项
   include/lexec/
-    execution.hpp  execution_policy.hpp  stop_token.hpp
+    execution.hpp  execution_policy.hpp  stop_token.hpp  any_sender_of.hpp（类型擦除，需单独包含）
     detail/      config.hpp meta.hpp tuple.hpp spin_wait.hpp manual_variant.hpp
     core/        completion_tags.hpp completion_signatures.hpp env.hpp queries.hpp domain.hpp
                  transform_sender.hpp receiver.hpp operation_state.hpp sender.hpp
@@ -286,7 +286,11 @@ lexec/
     - `counting_scope` 的 token 以 `stop-when` 包装 sender，实现为操作里的一个 `inplace_stop_source`，作用域的 token 与接收者的 token 都向它请求停止；
     - `associate` 的关联随操作存活，操作销毁后才解除；
     - `spawn` / `spawn_future` 用环境、sender 环境或 `std::allocator` 中的分配器分配状态，释放内存之后才解除关联；`spawn_future` 的完成、消费、停止、放弃各是一个标志位，每一方都只在自己的 `fetch_or` 之后决定由谁投递结果、由谁销毁状态；
-  - `any_sender_of`、`when_any`；
+  - `any_sender_of`（`lexec/any_sender_of.hpp`，不在 `execution.hpp` 里），形状与 stdexec 的新接口相同：`any_receiver<Sigs, queries<R(Q) noexcept...>>` 描述擦除后的接收者，`any_sender<AnyReceiver, SenderQueries>` 是擦除后的 sender，`any_scheduler<AnySender, SchedulerQueries>` 是擦除后的调度器，`any_sender_of<Sigs...>` 是只有完成签名的简写：
+    - 擦除后的接收者是一个指针加一张静态 vtable，环境只回答列出的查询和 `get_stop_token`（`inplace_stop_token`）；接收者的 token 是 `inplace_stop_token` 时直接传递，不可停止时给空 token，否则由操作里的 stop source 转发；
+    - 不超过 4 个指针、nothrow 可移动的 sender 内联存放，否则放在堆上；connect 总要分配一次，因为操作的类型只有被擦除的 sender 知道；
+    - `any_scheduler` 同样内联存放调度器，`schedule()` 的 sender 在属性里报告这个 `any_scheduler` 为完成调度器；两个 `any_scheduler` 相等，当且仅当所持调度器类型相同且相等；
+  - `when_any`；
   - 循环类算法，需要 trampoline 防止同步完成导致栈溢出。
 
   在此之前先完成了与 co2 协程库的桥，见「协程桥」。
