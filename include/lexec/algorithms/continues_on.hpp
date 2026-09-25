@@ -63,12 +63,6 @@ struct result_tuples<completion_signatures<Sigs...>> {
     using type = unique_t<type_list<typename result_tuple_of<Sigs>::type...>>;
 };
 
-template <class... Vs>
-using decayed_set_value = completion_signatures<set_value_t(std::decay_t<Vs>...)>;
-
-template <class E>
-using decayed_set_error = completion_signatures<set_error_t(std::decay_t<E>)>;
-
 template <class Sch, class ChildSigs, class... FwdEnv>
 struct continues_on_completions {
     using schedule_sigs = completion_signatures_of_t<schedule_result_t<Sch &>, FwdEnv...>;

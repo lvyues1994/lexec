@@ -28,6 +28,7 @@
 #include <lexec/algorithms/stopped_as.hpp>
 #include <lexec/algorithms/sync_wait.hpp>
 #include <lexec/algorithms/then.hpp>
+#include <lexec/algorithms/when_all.hpp>
 #include <lexec/algorithms/write_env.hpp>
 
 #include <lexec/schedulers/inline_scheduler.hpp>

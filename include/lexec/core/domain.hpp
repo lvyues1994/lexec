@@ -212,6 +212,22 @@ inline constexpr get_completion_domain_t<Tag> get_completion_domain{};
 
 namespace detail {
 
+// COMPL-DOMAIN: where a sender with these attributes completes with Tag, or, when its
+// attributes cannot tell, no information.
+template <class Attrs, class Tag, class Env, bool = std::is_invocable_v<get_completion_domain_t<Tag>, Attrs, Env>>
+struct completion_domain_or_unknown {
+    using type = indeterminate_domain<>;
+};
+
+template <class Attrs, class Tag, class Env>
+struct completion_domain_or_unknown<Attrs, Tag, Env, true> {
+    using type = remove_cvref_t<std::invoke_result_t<get_completion_domain_t<Tag>, Attrs, Env>>;
+};
+
+// No domain information at all dispatches like default_domain, which it then is.
+template <class Domain>
+using known_domain_t = std::conditional_t<std::is_same_v<Domain, indeterminate_domain<>>, default_domain, Domain>;
+
 // Attributes of a sender that completes, with one of Tags, wherever it is started.
 template <class... Tags>
 struct inline_attrs {

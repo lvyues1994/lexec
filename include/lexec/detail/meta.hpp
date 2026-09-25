@@ -120,6 +120,20 @@ struct rename<L<Ts...>, To> {
 template <class List, template <class...> class To>
 using rename_t = typename rename<List, To>::type;
 
+template <std::size_t I, class List>
+struct type_at;
+
+template <std::size_t I, class T, class... Ts>
+struct type_at<I, type_list<T, Ts...>> : type_at<I - 1, type_list<Ts...>> {};
+
+template <class T, class... Ts>
+struct type_at<0, type_list<T, Ts...>> {
+    using type = T;
+};
+
+template <std::size_t I, class... Ts>
+using type_at_t = typename type_at<I, type_list<Ts...>>::type;
+
 template <class List>
 struct list_size;
 

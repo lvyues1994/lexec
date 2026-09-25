@@ -165,7 +165,7 @@ struct then_op {
 - `sync_wait` 位于 `lexec::sync_wait`，标准中是 `std::this_thread::sync_wait`。
 - `then` / `upon_error` / `upon_stopped` 直接调用函数对象，暂不支持成员指针；标准使用 `std::invoke`。
 - 没有 domain 变换时，`connect` 直接连接原 sender；标准的 `default_domain` 会先把右值 sender 移动成一个新值（LWG4368），这里为零拷贝省掉这次移动。公开的 `transform_sender` 仍按标准返回新值。
-- `let_*` 不声明完成调度器和完成 domain；标准会计算各个第二 sender 完成 domain 的公共 domain，这需要 `indeterminate_domain`，阶段 3 随 `when_all` 加入。
+- `let_*` 和 `when_all` 对任何完成标签都报告同一个完成 domain（`let_*` 为各个第二 sender 与透传通道的公共 domain，`when_all` 为各子 sender 的公共 domain），没有信息时报告 `default_domain`；标准按完成标签分别计算。
 - `default_domain::apply_sender` 和 `sync_wait` 按 domain 分派尚未实现。
 
 ## 命名与风格

@@ -42,9 +42,13 @@ static_assert(not std::is_invocable_v<get_completion_domain_t<set_error_t>, just
 using then_attrs = lexec::env_of_t<decltype(lexec::just(1) | lexec::then(identity))>;
 static_assert(std::is_same_v<decltype(lexec::get_completion_domain<>(then_attrs{}, domain_env)), test_domain>);
 
-// let completes wherever its second sender does, which it cannot tell in advance.
+// let completes where its second sender does, which starts in the predecessor's domain.
 using let_attrs = lexec::env_of_t<decltype(lexec::just(1) | lexec::let_value(just_again))>;
-static_assert(not std::is_invocable_v<get_completion_domain_t<>, let_attrs, domain_env_t>);
+static_assert(std::is_same_v<decltype(lexec::get_completion_domain<>(let_attrs{}, domain_env)), test_domain>);
+
+// when_all completes where its children do.
+using when_all_attrs = lexec::env_of_t<decltype(lexec::when_all(lexec::just(1), lexec::just(2)))>;
+static_assert(std::is_same_v<decltype(lexec::get_completion_domain<>(when_all_attrs{}, domain_env)), test_domain>);
 
 // COMMON-DOMAIN: the one domain all are, or an indeterminate domain listing each once;
 // indeterminate_domain<> means no information and joins with anything.

@@ -152,6 +152,55 @@ struct let_completions<SetTag, Fn, Child, type_list<Env...>,
     using select = let_completions_select<computable, SetTag, Fn, child_sigs, second_env>;
 };
 
+template <class Fn>
+struct let_second_sender {
+    template <class... Vs>
+    using of = call_result_t<Fn, std::decay_t<Vs> &...>;
+};
+
+template <class Env2, class Tag>
+struct let_second_domain {
+    template <class Sndr>
+    using of = typename completion_domain_or_unknown<env_of_t<Sndr>, Tag, Env2>::type;
+};
+
+template <class List, template <class> class Fn>
+struct transform_list;
+
+template <class... Ts, template <class> class Fn>
+struct transform_list<type_list<Ts...>, Fn> {
+    using type = type_list<Fn<Ts>...>;
+};
+
+// No type when the predecessor's completions are unknown in Env, so that asking for
+// the domain fails without an error.
+template <class SetTag, class Tag, class Fn, class Child, class Env, class = void>
+struct let_completion_domain {};
+
+template <class SetTag, class Tag, class Fn, class Child, class Env>
+struct let_completion_domain<SetTag, Tag, Fn, Child, Env, std::void_t<completion_signatures_of_t<Child, fwd_env_t<Env>>>> {
+    using child_sigs = completion_signatures_of_t<Child, fwd_env_t<Env>>;
+    using second_env = let_second_env_t<let_env_t<SetTag, env_of_t<Child>, Env>, Env>;
+    using second_senders = gather_signatures_t<SetTag, child_sigs, let_second_sender<Fn>::template of, type_list>;
+    using second_domains =
+        typename transform_list<second_senders, let_second_domain<second_env, Tag>::template of>::type;
+    using passed_through =
+        std::conditional_t<std::is_same_v<Tag, SetTag>, type_list<>,
+                           type_list<typename completion_domain_or_unknown<env_of_t<Child>, Tag, fwd_env_t<Env>>::type>>;
+    using type = known_domain_t<rename_t<concat_t<passed_through, second_domains>, common_domain_t>>;
+};
+
+// let completes where the second sender for its channel does, and, for the channels it
+// passes through, where its predecessor does.
+template <class SetTag, class Fn, class Child>
+struct let_attrs {
+    template <class Tag, class Env, std::enable_if_t<is_completion_tag_v<Tag>, int> = 0>
+    constexpr auto query(get_completion_domain_t<Tag>, Env const &) const noexcept ->
+        typename let_completion_domain<SetTag, Tag, Fn, Child, Env>::type {
+        return {};
+    }
+};
+
 // Receives the second sender's completions and passes them to the let's receiver.
 template <class Rcvr, class LetEnv>
 struct let_receiver {
@@ -299,11 +348,11 @@ struct let_impls : default_impls {
     using completions =
         typename let_completions<SetTag, data_of_t<Self>, child_of_t<Self, 0>, type_list<Env...>>::select::type;
 
-    // Where the let completes depends on which second sender runs, so it claims no
-    // completion scheduler or domain.
+    // Which second sender runs is known only at run time, so the let claims no
+    // completion scheduler; its completion domain is common to all of them.
     template <class Data, class Child>
-    static constexpr env<> get_attrs(Data const &, Child const &) noexcept {
-        return env<>{};
+    static constexpr let_attrs<SetTag, Data, Child const &> get_attrs(Data const &, Child const &) noexcept {
+        return {};
     }
 
     template <class Sndr, class Rcvr>

@@ -32,6 +32,9 @@ template <class... Ts>
 struct manual_variant {
     static_assert(list_size_v<unique_t<type_list<Ts...>>> == sizeof...(Ts), "manual_variant alternatives must be distinct");
 
+    template <std::size_t I>
+    using alternative = type_at_t<I, Ts...>;
+
     manual_variant() noexcept = default;
     manual_variant(manual_variant &&) = delete;
     ~manual_variant() { reset(); }
