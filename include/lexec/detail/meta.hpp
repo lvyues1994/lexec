@@ -1,5 +1,7 @@
 #pragma once
 
+#include <lexec/detail/config.hpp>
+
 #include <cstddef>
 #include <type_traits>
 #include <utility>

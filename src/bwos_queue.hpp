@@ -4,6 +4,7 @@
 // Parallel Processing" (OSDI 2023), in its LIFO form, following the implementation in
 // NVIDIA stdexec (exec/detail/bwos_lifo_queue.hpp, Apache-2.0 WITH LLVM-exception).
 
+#include <lexec/detail/config.hpp>
 #include <lexec/detail/spin_wait.hpp>
 
 #include <atomic>

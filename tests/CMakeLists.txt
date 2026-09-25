@@ -37,13 +37,16 @@ add_library(lexec_header_check OBJECT ${lexec_header_check_sources})
 target_link_libraries(lexec_header_check PRIVATE lexec::lexec lexec_dev)
 
 # Optimized regardless of build type and free of sanitizer instrumentation, so the
-# disassembly reflects what users get.
-add_library(lexec_zero_overhead_probe OBJECT asm/zero_overhead_probe.cpp)
-target_link_libraries(lexec_zero_overhead_probe PRIVATE lexec::lexec)
-target_compile_options(lexec_zero_overhead_probe PRIVATE -O2)
-find_package(Python3 COMPONENTS Interpreter)
-if(Python3_Interpreter_FOUND AND CMAKE_OBJDUMP)
-    add_test(NAME lexec_zero_overhead_codegen
-        COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/asm/compare_functions.py" "${CMAKE_OBJDUMP}"
-            $<TARGET_OBJECTS:lexec_zero_overhead_probe> lexec_probe_direct lexec_probe_framework lexec_probe_reference)
+# disassembly reflects what users get. The comparison reads objdump output, and MSVC's
+# debug runtime checks reject /O2, so MSVC skips it.
+if(NOT MSVC)
+    add_library(lexec_zero_overhead_probe OBJECT asm/zero_overhead_probe.cpp)
+    target_link_libraries(lexec_zero_overhead_probe PRIVATE lexec::lexec)
+    target_compile_options(lexec_zero_overhead_probe PRIVATE -O2)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND AND CMAKE_OBJDUMP)
+        add_test(NAME lexec_zero_overhead_codegen
+            COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/asm/compare_functions.py" "${CMAKE_OBJDUMP}"
+                $<TARGET_OBJECTS:lexec_zero_overhead_probe> lexec_probe_direct lexec_probe_framework lexec_probe_reference)
+    endif()
 endif()

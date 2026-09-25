@@ -1,7 +1,7 @@
 # Build policy for lexec's own tests and benchmarks. Consumers of lexec::lexec never see it.
 
-if(NOT CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$")
-    message(FATAL_ERROR "lexec development builds currently support GCC and Clang only")
+if(NOT CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|MSVC)$")
+    message(FATAL_ERROR "lexec development builds support GCC, Clang, and MSVC only")
 endif()
 
 set(LEXEC_CXX_STANDARD 17 CACHE STRING "C++ standard for lexec's own builds")
@@ -29,20 +29,35 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(lexec_dev INTERFACE)
 
-target_compile_options(lexec_dev INTERFACE
-    -Wall -Wextra -Wpedantic
-    -Wconversion -Wsign-conversion -Wshadow
-    -Wold-style-cast -Wnon-virtual-dtor -Wzero-as-null-pointer-constant
-    $<$<BOOL:${LEXEC_WARNINGS_AS_ERRORS}>:-Werror>)
-
-if(LEXEC_DISABLE_EXCEPTIONS)
-    target_compile_options(lexec_dev INTERFACE -fno-exceptions)
+if(MSVC)
+    # C4324: padding added for alignas, which the concurrent structures ask for on purpose.
+    target_compile_options(lexec_dev INTERFACE
+        /W4 /permissive- /Zc:__cplusplus /utf-8 /wd4324
+        $<$<BOOL:${LEXEC_WARNINGS_AS_ERRORS}>:/WX>)
+    if(LEXEC_DISABLE_EXCEPTIONS)
+        target_compile_options(lexec_dev INTERFACE /EHs-c-)
+        target_compile_definitions(lexec_dev INTERFACE _HAS_EXCEPTIONS=0)
+    else()
+        target_compile_options(lexec_dev INTERFACE /EHsc)
+    endif()
+    if(LEXEC_SANITIZERS)
+        target_compile_options(lexec_dev INTERFACE /fsanitize=${LEXEC_SANITIZERS})
+    endif()
+else()
+    target_compile_options(lexec_dev INTERFACE
+        -Wall -Wextra -Wpedantic
+        -Wconversion -Wsign-conversion -Wshadow
+        -Wold-style-cast -Wnon-virtual-dtor -Wzero-as-null-pointer-constant
+        $<$<BOOL:${LEXEC_WARNINGS_AS_ERRORS}>:-Werror>)
+    if(LEXEC_DISABLE_EXCEPTIONS)
+        target_compile_options(lexec_dev INTERFACE -fno-exceptions)
+    endif()
+    if(LEXEC_SANITIZERS)
+        target_compile_options(lexec_dev INTERFACE
+            -fsanitize=${LEXEC_SANITIZERS} -fno-sanitize-recover=all -fno-omit-frame-pointer)
+        target_link_options(lexec_dev INTERFACE -fsanitize=${LEXEC_SANITIZERS})
+    endif()
 endif()
+
 target_compile_definitions(lexec_dev INTERFACE
     LEXEC_TEST_EXCEPTIONS_ENABLED=$<IF:$<BOOL:${LEXEC_DISABLE_EXCEPTIONS}>,0,1>)
-
-if(LEXEC_SANITIZERS)
-    target_compile_options(lexec_dev INTERFACE
-        -fsanitize=${LEXEC_SANITIZERS} -fno-sanitize-recover=all -fno-omit-frame-pointer)
-    target_link_options(lexec_dev INTERFACE -fsanitize=${LEXEC_SANITIZERS})
-endif()

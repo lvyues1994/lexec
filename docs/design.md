@@ -10,11 +10,11 @@ lexec 用 C++17 实现 C++26 最终版 `std::execution` 的接口。用户写 `n
 - **零拷贝**：
   - 同步路径上值既不拷贝也不移动，只转发引用；
   - 跨越异步边界（切换线程、等待兄弟任务、`let_*` 的后继）时，值移动一次存入 operation state，之后以引用交给后续步骤；
-  - 拷贝只在用户明确要求时发生，例如对左值 sender 多次 `connect`，或 `split` 有多个消费者。
+  - 拷贝只在用户明确要求时发生，例如对左值 sender 多次 `connect`。
 
 ## 已确定的决定
 
-- **编译器**：GCC 10+ / Clang 12+，先只支持 Linux，MSVC 在阶段 3 加入。
+- **编译器**：GCC 10+ / Clang 12+ 与 MSVC（Visual Studio 2022）。MSVC 的适配与 Windows CI 任务已加入，但本机无法验证，需推送后由 CI 确认。
 - **算法实现方式**：从一开始就基于 `basic_sender` 框架。
 - **异常**：同时支持开启异常和 `-fno-exceptions` 两种构建。关闭异常时，所有用户函数按不会抛出处理，完成签名里不出现 `set_error_t(std::exception_ptr)`，也不生成 try/catch。
 - **功能范围**：C++26 最终版 `std::execution`，加上 stdexec 的常用扩展 `static_thread_pool`、`when_any`、`any_sender_of`。
@@ -139,7 +139,6 @@ struct then_op {
 
 必须分配的地方只有以下几处，分配器都取自 `get_allocator(env)`：
 
-- `split`：多个消费者共享状态；
 - `spawn` / `spawn_future`：op 的生命周期脱离调用者的栈；
 - `any_sender_of`：类型擦除；
 - 线程池上 `bulk` 的分块状态：是否需要，由阶段 4 的基准决定。
@@ -186,11 +185,11 @@ lexec/
                  sender_traits.hpp scheduler.hpp
     framework/   basic_sender.hpp sender_adaptor_closure.hpp
     algorithms/  just.hpp then.hpp let.hpp read_env.hpp write_env.hpp into_variant.hpp
-                 stopped_as.hpp sync_wait.hpp when_all.hpp continues_on.hpp bulk.hpp ...
+                 stopped_as.hpp sync_wait.hpp when_all.hpp continues_on.hpp starts_on.hpp bulk.hpp ...
     schedulers/  run_loop.hpp inline_scheduler.hpp static_thread_pool.hpp
-  src/           static_thread_pool.cpp
+  src/           static_thread_pool.cpp bwos_queue.hpp（运行时库的私有实现）
   tests/         按层组织，含 static_assert 编译期测试、头文件自包含检查和 -O2 汇编比对
-  bench/         编译时间探针；之后另含一个 C++20 目标，用于和 stdexec 对比
+  bench/         编译时间探针；pool/ 下为与 stdexec 对比的线程池基准（stdexec 版以 C++20 编译）
   examples/
 ```
 
@@ -236,8 +235,8 @@ lexec/
   - `when_all` / `when_all_with_variant`，自带 `inplace_stop_source`，任一子任务出错或被取消时取消其余兄弟任务；
   - `schedule` / `starts_on` / `continues_on` / `on` / `schedule_from`；
   - `static_thread_pool`（编译进 `lexec::runtime`）：每个 worker 一个 BWoS 本地队列（32 块 × 8 槽，属主当前块不可被窃取，所以块要小）和一个只由属主取的无锁远程栈；worker 内部的提交进本地队列，外部提交按线程局部计数轮转到各 worker 的远程栈；worker 用「运行 / 休眠 / 已通知」三态加互斥锁休眠，提交方只在目标休眠时才进入系统调用；空闲时先以 pause 自旋轮询，再休眠。数据见 `docs/baselines.md`；
-  - `split`；
-  - MSVC 支持。
+  - MSVC 支持（未验证，见上）；
+  - 不含 `split`：它已被 P3682 从 C++26 移除，分叉执行由阶段 5 的 `spawn_future` 覆盖。
 - 验收：TSan 全部通过；取消竞态压力测试；与 stdexec 的 `static_thread_pool` 对比调度往返延迟（p50 / p99）和多提交线程下的吞吐。
 
 **阶段 4：数据并行**

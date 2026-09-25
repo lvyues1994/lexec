@@ -48,6 +48,22 @@ jobs:
       - run: cmake --build --preset ${{ matrix.preset }}
       - run: ctest --preset ${{ matrix.preset }}
 
+  msvc:
+    name: MSVC ${{ matrix.build }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { configure: msvc, build: msvc-debug }
+          - { configure: msvc, build: msvc-release }
+          - { configure: msvc-noexcept, build: msvc-noexcept }
+    steps:
+      - uses: actions/checkout@v6
+      - run: cmake --preset ${{ matrix.configure }}
+      - run: cmake --build --preset ${{ matrix.build }}
+      - run: ctest --preset ${{ matrix.build }}
+
   newer-standards:
     name: ${{ matrix.preset }} (C++${{ matrix.standard }})
     runs-on: ubuntu-24.04

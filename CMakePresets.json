@@ -90,6 +90,19 @@
       "inherits": ["gcc", "release"],
       "description": "Release build of the benchmarks comparing lexec with stdexec",
       "cacheVariables": { "LEXEC_BUILD_BENCHMARKS": true }
+    },
+    {
+      "name": "msvc",
+      "description": "Visual Studio generator; choose Debug or Release with the build preset",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": { "LEXEC_BUILD_TESTS": true }
+    },
+    {
+      "name": "msvc-noexcept",
+      "inherits": "msvc",
+      "cacheVariables": { "LEXEC_DISABLE_EXCEPTIONS": true }
     }
   ],
   "buildPresets": [
@@ -103,7 +116,10 @@
     { "name": "clang-asan", "configurePreset": "clang-asan" },
     { "name": "clang-tsan", "configurePreset": "clang-tsan" },
     { "name": "clang-noexcept", "configurePreset": "clang-noexcept" },
-    { "name": "gcc-bench", "configurePreset": "gcc-bench", "targets": ["lexec_pool_bench", "stdexec_pool_bench"] }
+    { "name": "gcc-bench", "configurePreset": "gcc-bench", "targets": ["lexec_pool_bench", "stdexec_pool_bench"] },
+    { "name": "msvc-debug", "configurePreset": "msvc", "configuration": "Debug" },
+    { "name": "msvc-release", "configurePreset": "msvc", "configuration": "Release" },
+    { "name": "msvc-noexcept", "configurePreset": "msvc-noexcept", "configuration": "Debug" }
   ],
   "testPresets": [
     {
@@ -123,7 +139,10 @@
     { "name": "clang-release", "inherits": "test-base", "configurePreset": "clang-release" },
     { "name": "clang-asan", "inherits": "test-base", "configurePreset": "clang-asan" },
     { "name": "clang-tsan", "inherits": "test-base", "configurePreset": "clang-tsan" },
-    { "name": "clang-noexcept", "inherits": "test-base", "configurePreset": "clang-noexcept" }
+    { "name": "clang-noexcept", "inherits": "test-base", "configurePreset": "clang-noexcept" },
+    { "name": "msvc-debug", "inherits": "test-base", "configurePreset": "msvc", "configuration": "Debug" },
+    { "name": "msvc-release", "inherits": "test-base", "configurePreset": "msvc", "configuration": "Release" },
+    { "name": "msvc-noexcept", "inherits": "test-base", "configurePreset": "msvc-noexcept", "configuration": "Debug" }
   ],
   "workflowPresets": [
     {
