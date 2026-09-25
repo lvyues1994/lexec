@@ -10,6 +10,7 @@ set(LEXEC_SANITIZERS "" CACHE STRING "Value passed to -fsanitize= for lexec's ow
 set(LEXEC_TEST_LAUNCHER "" CACHE STRING "Command prefix, as a CMake list, for running lexec's tests")
 option(LEXEC_DISABLE_EXCEPTIONS "Build lexec's own targets with -fno-exceptions" OFF)
 option(LEXEC_WARNINGS_AS_ERRORS "Treat warnings as errors in lexec's own targets" ON)
+option(LEXEC_BUILD_BENCHMARKS "Build the benchmarks comparing lexec with stdexec, which fetches stdexec" OFF)
 set(LEXEC_COMPILE_MEMORY_LIMIT 4294967296 CACHE STRING
     "Address-space limit in bytes for each compiler process of lexec's own builds; 0 disables it")
 

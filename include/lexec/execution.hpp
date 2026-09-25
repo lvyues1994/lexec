@@ -33,3 +33,4 @@
 
 #include <lexec/schedulers/inline_scheduler.hpp>
 #include <lexec/schedulers/run_loop.hpp>
+#include <lexec/schedulers/static_thread_pool.hpp>

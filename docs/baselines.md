@@ -30,6 +30,22 @@
 - **`let` 接收者类型的教训**：前驱的接收者最初是 `let_child_receiver<State, Rcvr>`，而 `State` 本身已包含 `Rcvr`，于是接收者类型名每嵌套一层就翻倍。不带 `-g` 时，嵌套 14 层用 473 MiB，20 层超过 4 GiB。改为 `let_child_receiver<SetTag, Sndr, Rcvr>` 后，20 层只用 153 MiB。
 - **编译内存保护**：开发构建通过 `prlimit` 给每个编译器进程设 4 GiB 地址空间上限（`LEXEC_COMPILE_MEMORY_LIMIT`，设为 0 关闭）。同类回归会让那个编译单元报错退出，而不是耗尽机器内存；对最初的 GCC 调试信息问题，编译在 6.4 秒时退出。
 
+## 线程池（阶段 3）
+
+测量命令：`cmake --preset gcc-bench`、`cmake --build --preset gcc-bench`，然后 `python3 bench/pool/compare.py build/gcc-bench 5`。两个库各用 8 个 worker 的 `static_thread_pool`，交替各运行 5 次，每项取中位数；stdexec 为提交 `ead186b`，以 C++20 编译。
+
+| 指标 | lexec | stdexec |
+|---|---|---|
+| 调度往返延迟 p50 / p99 / p99.9（`sync_wait(schedule \| then)`） | 1.85 / 4.2 / 6.6 µs | 3.44 / 6.0 / 13.1 µs |
+| 吞吐，1 个提交线程 | 1120 万任务/秒 | 1040 万任务/秒 |
+| 吞吐，4 个提交线程 | 1560 万任务/秒 | 2510 万任务/秒 |
+| 吞吐，8 个提交线程 | 1960 万任务/秒 | 5130 万任务/秒 |
+| 池内任务向池扇出 8 个子任务 | 2.77 µs | 3.57 µs |
+
+- 往返延迟的 p50 呈双峰：worker 在主线程进入等待之前接走任务时约 0.8 µs，否则多一次 futex 唤醒，约 3 µs。
+- 多提交线程时落后的原因：所有提交线程都对同一个 worker 远程栈的栈顶做 CAS；stdexec 为每个提交线程分配各自的一组远程队列，提交之间没有争用。这是下一步的调优项。
+- 调优中排除的做法：远程提交时另外唤醒一个休眠 worker（每次提交都触发 futex，吞吐降到约 300 万任务/秒）；允许空闲 worker 拿走别人的远程队列（与提交线程争用同一批栈顶）；自旋中使用 `yield`（worker 对新任务反应变慢，p50 退到约 3.6 µs）。
+
 ## 零开销（阶段 1）
 
 以下各项都由测试持续检查：
@@ -50,3 +66,8 @@
   - `let_value`：前驱的值移动 1 次存入 `let` 的状态，之后以左值引用交给函数，0 次拷贝；
   - `into_variant`：每个值移动 1 次存入 variant，0 次拷贝。
 - **堆分配**：由 `let_value`、`stopped_as_optional`、`into_variant` 组成的管道不分配。
+
+## 零开销（阶段 3）
+
+- **拷贝与移动**：`continues_on` 和 `when_all` 都是每个值移动 1 次存入操作，0 次拷贝。
+- **堆分配**：在 `static_thread_pool` 上调度、`on` 到另一个线程的 `run_loop` 再回来，都不分配。

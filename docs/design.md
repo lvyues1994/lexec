@@ -235,7 +235,7 @@ lexec/
 - 内容：
   - `when_all` / `when_all_with_variant`，自带 `inplace_stop_source`，任一子任务出错或被取消时取消其余兄弟任务；
   - `schedule` / `starts_on` / `continues_on` / `on` / `schedule_from`；
-  - `static_thread_pool`：每个 worker 一个本地队列加工作窃取，任务节点侵入式，空闲时先自旋再休眠；自旋时长和窃取策略由基准决定；
+  - `static_thread_pool`（编译进 `lexec::runtime`）：每个 worker 一个 BWoS 本地队列（32 块 × 8 槽，属主当前块不可被窃取，所以块要小）和一个只由属主取的无锁远程栈；worker 内部的提交进本地队列，外部提交按线程局部计数轮转到各 worker 的远程栈；worker 用「运行 / 休眠 / 已通知」三态加互斥锁休眠，提交方只在目标休眠时才进入系统调用；空闲时先以 pause 自旋轮询，再休眠。数据见 `docs/baselines.md`；
   - `split`；
   - MSVC 支持。
 - 验收：TSan 全部通过；取消竞态压力测试；与 stdexec 的 `static_thread_pool` 对比调度往返延迟（p50 / p99）和多提交线程下的吞吐。

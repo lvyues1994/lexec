@@ -84,7 +84,13 @@
     { "name": "clang-release", "inherits": ["clang", "release"] },
     { "name": "clang-asan", "inherits": ["clang", "asan"] },
     { "name": "clang-tsan", "inherits": ["clang", "tsan"] },
-    { "name": "clang-noexcept", "inherits": ["clang", "noexcept"] }
+    { "name": "clang-noexcept", "inherits": ["clang", "noexcept"] },
+    {
+      "name": "gcc-bench",
+      "inherits": ["gcc", "release"],
+      "description": "Release build of the benchmarks comparing lexec with stdexec",
+      "cacheVariables": { "LEXEC_BUILD_BENCHMARKS": true }
+    }
   ],
   "buildPresets": [
     { "name": "gcc-debug", "configurePreset": "gcc-debug" },
@@ -96,7 +102,8 @@
     { "name": "clang-release", "configurePreset": "clang-release" },
     { "name": "clang-asan", "configurePreset": "clang-asan" },
     { "name": "clang-tsan", "configurePreset": "clang-tsan" },
-    { "name": "clang-noexcept", "configurePreset": "clang-noexcept" }
+    { "name": "clang-noexcept", "configurePreset": "clang-noexcept" },
+    { "name": "gcc-bench", "configurePreset": "gcc-bench", "targets": ["lexec_pool_bench", "stdexec_pool_bench"] }
   ],
   "testPresets": [
     {

@@ -15,7 +15,9 @@ if(LEXEC_SANITIZERS)
     list(FILTER lexec_test_sources EXCLUDE REGEX "/allocation_(counter|test)\\.cpp$")
 endif()
 add_executable(lexec_tests ${lexec_test_sources})
-target_link_libraries(lexec_tests PRIVATE lexec::lexec lexec_dev doctest::doctest)
+target_link_libraries(lexec_tests PRIVATE lexec::lexec lexec::runtime lexec_dev doctest::doctest)
+# The runtime's private headers, such as its work-stealing queue, are tested directly.
+target_include_directories(lexec_tests PRIVATE "${PROJECT_SOURCE_DIR}/src")
 # Defining this with exceptions enabled would switch doctest's exception assertions off.
 target_compile_definitions(lexec_tests PRIVATE
     $<$<BOOL:${LEXEC_DISABLE_EXCEPTIONS}>:DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS>)

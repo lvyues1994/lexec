@@ -51,6 +51,17 @@ TEST_CASE("moving work to another thread's scheduler and back allocates nothing"
     CHECK(after == before);
 }
 
+TEST_CASE("scheduling on static_thread_pool allocates nothing") {
+    auto pool = lexec::static_thread_pool{2};
+    auto const before = lexec_test::allocation_count();
+    auto const result = lexec::sync_wait(lexec::schedule(pool.get_scheduler()) |
+                                         lexec::then([]() noexcept { return 42; }) |
+                                         lexec::continues_on(pool.get_scheduler()));
+    auto const after = lexec_test::allocation_count();
+    CHECK(std::get<0>(*result) == 42);
+    CHECK(after == before);
+}
+
 TEST_CASE("the allocation counter observes allocations") {
     auto const before = lexec_test::allocation_count();
     auto const text = std::string(64, 'x');
