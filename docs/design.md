@@ -170,6 +170,8 @@ struct then_op {
 - 没有 domain 变换时，`connect` 直接连接原 sender；标准的 `default_domain` 会先把右值 sender 移动成一个新值（LWG4368），这里为零拷贝省掉这次移动。公开的 `transform_sender` 仍按标准返回新值。
 - `let_*` 和 `when_all` 对任何完成标签都报告同一个完成 domain（`let_*` 为各个第二 sender 与透传通道的公共 domain，`when_all` 为各子 sender 的公共 domain），没有信息时报告 `default_domain`；标准按完成标签分别计算。
 - `default_domain::apply_sender` 和 `sync_wait` 按 domain 分派尚未实现。
+- 计数作用域的 `join()`：接收者环境没有 `get_start_scheduler` 时，在结束最后一个关联的线程上直接完成；标准此时不能连接。
+- `spawn_future`：消费者收到停止请求时立即以 set_stopped 完成，共享状态在派生的操作完成后才销毁（草案的文字在此处销毁得过早）。
 - `parallel_scheduler` 的后端接口以 `lexec::span<std::byte>` 代替 `std::span<std::byte>`：后端是编译进运行时的虚函数，其签名不能随语言模式改变。`receiver_proxy::try_query` 只在接收者的 stop token 本身是 `inplace_stop_token` 时返回它，其余情况返回 `nullopt`（标准允许由实现决定）。关闭异常时，完成签名里没有 `exception_ptr`，后端若报告错误则调用 `std::terminate`。
 - 线程池上的 `bulk` 系列把前驱的值移动存入 op state，向下游发送的是这些衰变后的值（标准允许「值或其衰变副本」）；它的 `bulk_unchunked` 每次领取一批下标，仍逐个下标调用函数，但不保证每个下标各在一个执行代理上（标准对此只是推荐做法）。
 
@@ -205,7 +207,9 @@ lexec/
                  sender_traits.hpp scheduler.hpp
     framework/   basic_sender.hpp sender_adaptor_closure.hpp
     algorithms/  just.hpp then.hpp let.hpp read_env.hpp write_env.hpp into_variant.hpp
-                 stopped_as.hpp sync_wait.hpp when_all.hpp continues_on.hpp starts_on.hpp bulk.hpp ...
+                 stopped_as.hpp sync_wait.hpp when_all.hpp continues_on.hpp starts_on.hpp bulk.hpp
+                 associate.hpp spawn.hpp（spawn / spawn_future） stop_when.hpp ...
+    scopes/      counting_scope.hpp（scope 概念、simple_counting_scope、counting_scope）
     schedulers/  run_loop.hpp inline_scheduler.hpp static_thread_pool.hpp parallel_scheduler.hpp
     coro/        co2.hpp（与 co2 协程库的桥，可选）
   src/           static_thread_pool.cpp parallel_scheduler.cpp（默认后端） bwos_queue.hpp（运行时库的私有实现）
@@ -276,7 +280,12 @@ lexec/
 **阶段 5：结构化并发与边界工具**
 
 - 内容：
-  - `simple_counting_scope` / `counting_scope`、`spawn` / `spawn_future` / `associate`；
+  - `simple_counting_scope` / `counting_scope`、`spawn` / `spawn_future` / `associate`，按 C++26 最终草案（`scope_association` / `scope_token`）实现：
+    - 作用域把状态与计数放在一个原子字里，关联与解除关联都是一次原子更新；最后一次解除关联在同一次更新里把正在 join 的作用域变为 joined，其间不会插入新的关联；登记 join 与完成 join 另外持有一把互斥锁；
+    - `join()` 异步完成时经接收者的 `get_start_scheduler` 调度；为此新增该查询，`sync_wait` 的环境与 SCHED-ENV 都回答它；
+    - `counting_scope` 的 token 以 `stop-when` 包装 sender，实现为操作里的一个 `inplace_stop_source`，作用域的 token 与接收者的 token 都向它请求停止；
+    - `associate` 的关联随操作存活，操作销毁后才解除；
+    - `spawn` / `spawn_future` 用环境、sender 环境或 `std::allocator` 中的分配器分配状态，释放内存之后才解除关联；`spawn_future` 的完成、消费、停止、放弃各是一个标志位，每一方都只在自己的 `fetch_or` 之后决定由谁投递结果、由谁销毁状态；
   - `any_sender_of`、`when_any`；
   - 循环类算法，需要 trampoline 防止同步完成导致栈溢出。
 

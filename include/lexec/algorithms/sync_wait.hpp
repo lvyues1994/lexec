@@ -22,6 +22,7 @@ namespace detail {
 
 struct sync_wait_env {
     run_loop_scheduler query(get_scheduler_t) const noexcept { return loop->get_scheduler(); }
+    run_loop_scheduler query(get_start_scheduler_t) const noexcept { return loop->get_scheduler(); }
     run_loop_scheduler query(get_delegation_scheduler_t) const noexcept { return loop->get_scheduler(); }
 
     run_loop *loop;

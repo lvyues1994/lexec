@@ -82,6 +82,8 @@ struct get_stop_token_t {
 
 struct get_allocator_t : detail::required_query<get_allocator_t> {};
 struct get_delegation_scheduler_t : detail::required_query<get_delegation_scheduler_t> {};
+// The scheduler an operation started with this environment is, or was, started on.
+struct get_start_scheduler_t : detail::required_query<get_start_scheduler_t> {};
 
 struct get_scheduler_t;
 struct get_domain_t;
@@ -182,6 +184,7 @@ inline constexpr get_stop_token_t get_stop_token{};
 inline constexpr get_allocator_t get_allocator{};
 inline constexpr get_scheduler_t get_scheduler{};
 inline constexpr get_delegation_scheduler_t get_delegation_scheduler{};
+inline constexpr get_start_scheduler_t get_start_scheduler{};
 inline constexpr get_forward_progress_guarantee_t get_forward_progress_guarantee{};
 
 template <class Tag>

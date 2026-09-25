@@ -31,6 +31,7 @@ namespace detail {
 template <class Sch>
 struct sched_env {
     constexpr Sch query(get_scheduler_t) const noexcept { return sch; }
+    constexpr Sch query(get_start_scheduler_t) const noexcept { return sch; }
 
     template <class S = Sch, std::enable_if_t<has_query_v<S const &, get_domain_t>, int> = 0>
     constexpr auto query(get_domain_t) const noexcept {
