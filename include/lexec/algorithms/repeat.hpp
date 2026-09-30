@@ -196,8 +196,8 @@ struct loop_state : trampoline_task {
     loop_state(Sndr &&sndr, Rcvr &rcvr_) noexcept(
         std::is_nothrow_constructible_v<child_type, child_of_t<Sndr, 0>> and
         noexcept(lexec::connect(std::declval<child_type &>(), std::declval<receiver>())))
-        : trampoline_task{&run_iteration}, data(static_cast<Sndr &&>(sndr).data),
-          child(detail::get<0>(static_cast<Sndr &&>(sndr).children)), rcvr(&rcvr_) {
+        : trampoline_task{&run_iteration}, child(detail::get<0>(static_cast<Sndr &&>(sndr).children)), rcvr(&rcvr_),
+          data(static_cast<Sndr &&>(sndr).data) {
         if constexpr (std::is_same_v<Tag, repeat_n_t>) {
             if (data == 0) {
                 return;
@@ -233,10 +233,10 @@ struct loop_state : trampoline_task {
         }
     }
 
-    LEXEC_NO_UNIQUE_ADDRESS data_type data;
     child_type child;
     Rcvr *rcvr;
     manual_variant<child_op> ops;
+    LEXEC_NO_UNIQUE_ADDRESS data_type data;
 
 private:
     static constexpr bool nothrow_reconnect = nothrow_reconnect_v<child_type, rcvr_env>;

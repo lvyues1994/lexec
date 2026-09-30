@@ -32,7 +32,7 @@ C++17 是这个模型能成立的最低标准，因为有**保证拷贝消除**�
 - **没有 `std::stop_token`**：自行实现 `inplace_stop_source/token/callback` 和 `never_stop_token`。
 - **没有 consteval 和 constexpr 异常**：completion signatures 在类型层面用 `decltype` 计算。
 - **没有协程**：核心库不含 `task` / `as_awaitable`。协程由可选的桥 `lexec/coro/co2.hpp` 对接 co2（C++14 无栈协程库，协议与 C++20 协程同形），见「协程桥」。
-- **`[[no_unique_address]]` 是 C++20 特性**：GCC 和 Clang 在 C++17 模式下作为扩展支持，统一封装为 `LEXEC_NO_UNIQUE_ADDRESS`。Clang 18 在嵌套聚合初始化含这种空成员的类型时会崩溃，所以 `detail::tuple` 对空元素改用空基类优化，只有通过构造函数初始化的成员才使用这个宏。保证拷贝消除不适用于 `[[no_unique_address]]` 成员和基类子对象，所以框架只对空的算法状态使用这个宏；不可移动的状态（如 `let_*` 的状态）以普通成员从 prvalue 原地构造。存放子操作的 `inner_ops` 使用 `LEXEC_IMMOVABLE_NO_UNIQUE_ADDRESS`：MSVC 在 `/O2` 下对这种原地构造的 `[[msvc::no_unique_address]]` 成员会写出对象边界（C4789），所以该宏在 MSVC 上为空。
+- **`[[no_unique_address]]` 是 C++20 特性**：GCC 和 Clang 在 C++17 模式下作为扩展支持，统一封装为 `LEXEC_NO_UNIQUE_ADDRESS`。Clang 18 在嵌套聚合初始化含这种空成员的类型时会崩溃，所以 `detail::tuple` 对空元素改用空基类优化，只有通过构造函数初始化的成员才使用这个宏。保证拷贝消除不适用于 `[[no_unique_address]]` 成员和基类子对象，所以框架只对空的算法状态使用这个宏；不可移动的状态（如 `let_*` 的状态）以普通成员从 prvalue 原地构造。存放子操作的 `inner_ops` 使用 `LEXEC_IMMOVABLE_NO_UNIQUE_ADDRESS`：MSVC 在 `/O2` 下对这种原地构造的 `[[msvc::no_unique_address]]` 成员会写出对象边界（C4789），所以该宏在 MSVC 上为空。MSVC 19.44 还有一个布局错误：类有非空基类、且第一个成员是 `[[msvc::no_unique_address]]` 的空成员时，其后的成员会被放在偏移 0，与基类重叠，Debug 和 Release 都如此；所以派生类里这类成员不放在最前面。
 
 ## 分层架构
 

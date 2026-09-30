@@ -23,7 +23,9 @@
 #endif
 
 // GCC and Clang accept the C++20 attribute in C++17 mode as an extension; MSVC ignores it
-// and has its own spelling.
+// and has its own spelling. MSVC 19.44 lays out the member after an empty such member
+// that comes first after a non-empty base on top of the base, so in a derived class
+// these members never come first.
 #if defined(_MSC_VER) && !defined(__clang__)
 #define LEXEC_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
 #elif defined(__has_cpp_attribute)
