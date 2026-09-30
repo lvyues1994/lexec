@@ -41,6 +41,20 @@ template <class Rcvr, class... Sigs>
 inline constexpr bool accepts_completions_v<Rcvr, completion_signatures<Sigs...>> =
     (accepts_signature_v<Rcvr, Sigs> and ...);
 
+// Stands in for a receiver where only its environment is known, as when computing
+// completion signatures.
+template <class Env>
+struct receiver_archetype {
+    using receiver_concept = receiver_t;
+
+    template <class... Vs>
+    void set_value(Vs &&...) && noexcept;
+    template <class E>
+    void set_error(E &&) && noexcept;
+    void set_stopped() && noexcept;
+    Env get_env() const noexcept;
+};
+
 } // namespace detail
 
 template <class Rcvr>

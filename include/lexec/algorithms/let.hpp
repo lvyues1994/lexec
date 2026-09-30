@@ -62,19 +62,6 @@ using let_env_t = decltype(make_let_env<SetTag>(std::declval<Attrs const &>(), s
 template <class LetEnv, class... Env>
 using let_second_env_t = env<env_ref<LetEnv>, fwd_env_t<Env>...>;
 
-// Stands in for the second sender's receiver where only its environment is known.
-template <class Env>
-struct receiver_archetype {
-    using receiver_concept = receiver_t;
-
-    template <class... Vs>
-    void set_value(Vs &&...) && noexcept;
-    template <class E>
-    void set_error(E &&) && noexcept;
-    void set_stopped() && noexcept;
-    Env get_env() const noexcept;
-};
-
 template <class Fn, class Env2, class... Vs>
 struct let_bind_traits {
     static_assert(is_callable_v<Fn, std::decay_t<Vs> &...>,

@@ -210,9 +210,11 @@ lexec/
     framework/   basic_sender.hpp sender_adaptor_closure.hpp
     algorithms/  just.hpp then.hpp let.hpp read_env.hpp write_env.hpp into_variant.hpp
                  stopped_as.hpp sync_wait.hpp when_all.hpp continues_on.hpp starts_on.hpp bulk.hpp
-                 associate.hpp spawn.hpp（spawn / spawn_future） stop_when.hpp ...
+                 associate.hpp spawn.hpp（spawn / spawn_future） stop_when.hpp
+                 repeat.hpp（repeat_until / repeat / repeat_n） ...
     scopes/      counting_scope.hpp（scope 概念、simple_counting_scope、counting_scope）
     schedulers/  run_loop.hpp inline_scheduler.hpp static_thread_pool.hpp parallel_scheduler.hpp
+                 trampoline_scheduler.hpp
     coro/        co2.hpp（与 co2 协程库的桥，可选）
   src/           static_thread_pool.cpp parallel_scheduler.cpp（默认后端） bwos_queue.hpp（运行时库的私有实现）
   tests/         按层组织，含 static_assert 编译期测试、头文件自包含检查和 -O2 汇编比对；
@@ -294,7 +296,12 @@ lexec/
     - `any_scheduler` 同样内联存放调度器，`schedule()` 的 sender 在属性里报告这个 `any_scheduler` 为完成调度器；两个 `any_scheduler` 相等，当且仅当所持调度器类型相同且相等；
   - `when_any`，语义与 stdexec 相同：第一个完成的子 sender 胜出，不论哪个通道；它的结果衰变后存入 op state，其余子 sender 被请求停止，全部结束后才把结果交给接收者，接收者此时已请求停止则改为 set_stopped。完成签名是各子 sender 签名衰变后的并集加上 set_stopped，存储结果可能抛异常时再加 `set_error_t(std::exception_ptr)`；环境与 stop source 的转发和 `when_all` 共用；
   - `sync_wait_with_variant`：阶段 1 漏掉了，这时补上，与 `sync_wait` 共用等待和存储结果的实现；
-  - 循环类算法，需要 trampoline 防止同步完成导致栈溢出。
+  - 循环类算法 `repeat_until` / `repeat` / `repeat_n` 与 `trampoline_scheduler`，名称和语义取自 stdexec（`exec::repeat_until` 等）：
+    - 每一轮以左值重新 connect 子 sender，上一轮的 op state 在它自己的完成里被替换；`repeat_until` 的子 sender 以一个可转换为 `bool` 的值完成，`true` 结束循环，`std::false_type` 永不结束；`repeat` 只因错误或停止结束；`repeat_n` 为 0 时不启动子 sender 直接完成；
+    - 每一轮都经过 trampoline 开始：同一线程上嵌套超过 16 层或栈增长超过 4096 字节时，这一轮排进最外层那次运行的队列，等栈退回去再执行，所以同步完成的循环不会撑爆栈；开始之前检查接收者的 stop token，已请求停止则以 set_stopped 结束；
+    - trampoline 的队列是侵入式的，循环状态本身就是队列节点，不分配；`thread_local` 只有一个指向最外层运行的指针；
+    - 与 stdexec 的不同：结束时不先销毁子 op、也不复制错误，错误按引用原样转发，子 op 随循环 op 一起销毁，所以复制错误不会带来 `exception_ptr`；每一轮不另外 connect 一个 trampoline 的 schedule sender（stdexec 用 `sequence(schedule(trampoline), child)`），循环状态直接挂到 trampoline 上；stdexec 的 trampoline 在最外层那次运行里没有记录栈的起点，第一层嵌套总会被排队，这里从最外层开始计量；
+    - 循环不报告完成调度器；完成 domain 是可能发出该完成的各处的公共 domain：值完成来自子 sender 的值完成（`repeat_n` 另有计数为 0 时的启动处），错误来自子 sender 的错误和值完成（重新 connect 的异常在后者里发出），停止来自子 sender 的停止、值完成和启动处。
 
   在此之前先完成了与 co2 协程库的桥，见「协程桥」。
 
@@ -302,5 +309,5 @@ lexec/
 
 - **编译时间**：C++17 的 SFINAE 比 concepts 更贵，从阶段 1 起持续记录。
 - **stop token 的并发正确性**：回调正在另一个线程执行时，注销方必须等待其完成。
-- **同步完成的栈深度**：长链或循环在 inline 完成时递归，阶段 5 用 trampoline 解决。
+- **同步完成的栈深度**：inline 完成时每一步都在前一步的完成里执行。普通管道的深度由它的长度决定，是静态的；循环的深度随迭代增长，阶段 5 的循环算法经 trampoline 限制。用户借助 `any_sender_of` 与 `let_value` 自己递归构造的循环不经过 trampoline，需要自己在每一轮前 `schedule(trampoline_scheduler{})`。
 - **类型名的超线性增长**：同一类型在模板实参里重复出现，会让嵌套类型的名字逐层翻倍，编译内存随之指数增长；阶段 1 的 GCC 调试信息和阶段 2 的 `let` 接收者都出现过。深层嵌套的编译时间探针和每个编译进程的内存上限用来及早发现它。

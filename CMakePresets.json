@@ -119,7 +119,8 @@
     {
       "name": "gcc-bench",
       "configurePreset": "gcc-bench",
-      "targets": ["lexec_pool_bench", "stdexec_pool_bench", "lexec_bulk_bench", "stdexec_bulk_bench", "manual_bulk_bench"]
+      "targets": ["lexec_pool_bench", "stdexec_pool_bench", "lexec_bulk_bench", "stdexec_bulk_bench", "manual_bulk_bench",
+                  "lexec_loop_bench", "stdexec_loop_bench"]
     },
     { "name": "msvc-debug", "configurePreset": "msvc", "configuration": "Debug" },
     { "name": "msvc-release", "configurePreset": "msvc", "configuration": "Release" },

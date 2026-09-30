@@ -27,6 +27,7 @@
 #include <lexec/algorithms/just.hpp>
 #include <lexec/algorithms/let.hpp>
 #include <lexec/algorithms/read_env.hpp>
+#include <lexec/algorithms/repeat.hpp>
 #include <lexec/algorithms/spawn.hpp>
 #include <lexec/algorithms/starts_on.hpp>
 #include <lexec/algorithms/stopped_as.hpp>
@@ -42,3 +43,4 @@
 #include <lexec/schedulers/parallel_scheduler.hpp>
 #include <lexec/schedulers/run_loop.hpp>
 #include <lexec/schedulers/static_thread_pool.hpp>
+#include <lexec/schedulers/trampoline_scheduler.hpp>

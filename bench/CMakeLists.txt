@@ -37,4 +37,12 @@ if(LEXEC_BUILD_BENCHMARKS)
 
     add_executable(manual_bulk_bench bulk/manual_bulk_bench.cpp)
     target_link_libraries(manual_bulk_bench PRIVATE lexec_dev Threads::Threads)
+
+    add_executable(lexec_loop_bench loop/lexec_loop_bench.cpp)
+    target_link_libraries(lexec_loop_bench PRIVATE lexec::runtime lexec_dev)
+
+    add_executable(stdexec_loop_bench loop/stdexec_loop_bench.cpp)
+    set_target_properties(stdexec_loop_bench PROPERTIES CXX_STANDARD 20)
+    target_include_directories(stdexec_loop_bench SYSTEM PRIVATE "${stdexec_SOURCE_DIR}/include")
+    target_link_libraries(stdexec_loop_bench PRIVATE Threads::Threads)
 endif()

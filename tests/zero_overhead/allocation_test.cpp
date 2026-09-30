@@ -76,6 +76,18 @@ TEST_CASE("let, into_variant, and stopped_as_optional allocate nothing") {
     CHECK(after == before);
 }
 
+// The trampoline queues iterations through the loop state itself, so bouncing, which
+// every few iterations of these synchronous loops do, allocates nothing either.
+TEST_CASE("loops allocate nothing") {
+    auto runs = 0;
+    auto const before = lexec_test::allocation_count();
+    lexec::sync_wait(lexec::repeat_n(lexec::just() | lexec::then([&runs]() noexcept { ++runs; }), 10'000));
+    lexec::sync_wait(lexec::repeat_until(lexec::just() | lexec::then([&runs]() noexcept { return ++runs == 20'000; })));
+    auto const after = lexec_test::allocation_count();
+    CHECK(runs == 20'000);
+    CHECK(after == before);
+}
+
 TEST_CASE("moving work to another thread's scheduler and back allocates nothing") {
     auto other = lexec_test::loop_thread{};
     auto const before = lexec_test::allocation_count();

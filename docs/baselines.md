@@ -114,6 +114,21 @@
 
 - **堆分配**（`tests/zero_overhead/allocation_test.cpp`）：`any_sender_of<set_value_t(int)> s = just(7)` 构造时不分配（sender 内联存放），`sync_wait(std::move(s))` 恰好分配一次，即被擦除的操作。
 
+## 循环（阶段 5）
+
+测量命令：`cmake --preset gcc-bench`、`cmake --build --preset gcc-bench`，然后 `python3 bench/loop/compare.py build/gcc-bench 5`。两个库交替各运行 5 次，每项取中位数；stdexec 为提交 `ead186b`，以 C++20 编译。
+
+| 每轮耗时 | lexec | stdexec |
+|---|---|---|
+| `repeat_n(just() \| then(f), 10⁷)`，同步完成 | 3.05 ns | 3.53 ns |
+| `repeat_until(just() \| then(f))`，同步完成 10⁷ 轮 | 2.25 ns | 5.27 ns |
+| `repeat_n(schedule(pool) \| then(f), 10⁶)`，1 个 worker | 9.8 ns | 12.3 ns |
+
+- 同步完成的两项只有循环本身的开销：每轮重新 connect 子 sender，经过 trampoline，每十几轮退栈一次。
+- 线程池一项的提交来自 worker 自己，只是本地队列的一次压入和弹出，不含跨线程唤醒。
+- **堆分配**（`tests/zero_overhead/allocation_test.cpp`）：`repeat_n` 与 `repeat_until` 同步运行上万轮都不分配，trampoline 退栈时排队的就是循环状态本身。
+- **拷贝**：每一轮以左值 connect 子 sender，子 sender 在 connect 时复制的东西（例如 `just` 的值）每轮复制一次，与 stdexec 相同。
+
 ## 零开销（协程桥）
 
 以下由 `tests/coro/allocation_test.cpp` 检查（`lexec_coro_tests`，sanitizer 构建中不运行）：
