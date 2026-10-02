@@ -106,9 +106,11 @@ struct continues_on_state {
     using results_type =
         rename_t<typename result_tuples<child_completions_t<Sndr, 0, env_of_t<Rcvr>>>::type, manual_variant>;
     using schedule_receiver = continues_on_receiver<Sndr, Rcvr>;
-    using schedule_op = connect_result_t<schedule_result_t<scheduler_type &>, schedule_receiver>;
+    using schedule_op = connect_result_t<schedule_result_t<scheduler_type const &>, schedule_receiver>;
 
-    continues_on_state(scheduler_type &sch, Rcvr &rcvr_) noexcept(
+    // The scheduler is const when the sender is connected as a const lvalue, as the loops
+    // connect their child each iteration.
+    continues_on_state(scheduler_type const &sch, Rcvr &rcvr_) noexcept(
         noexcept(lexec::connect(lexec::schedule(sch), std::declval<schedule_receiver>())))
         : rcvr(&rcvr_), op(lexec::connect(lexec::schedule(sch), schedule_receiver{this})) {}
 
@@ -141,7 +143,7 @@ struct continues_on_impls : default_impls {
 
     template <class Sndr, class Rcvr>
     static auto get_state(Sndr &&sndr, Rcvr &rcvr) noexcept(
-        std::is_nothrow_constructible_v<continues_on_state<Sndr, Rcvr>, data_of_t<Sndr> &, Rcvr &>)
+        std::is_nothrow_constructible_v<continues_on_state<Sndr, Rcvr>, data_of_t<Sndr> const &, Rcvr &>)
         -> continues_on_state<Sndr, Rcvr> {
         return continues_on_state<Sndr, Rcvr>{sndr.data, rcvr};
     }

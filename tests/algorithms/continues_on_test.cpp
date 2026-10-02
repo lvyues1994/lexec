@@ -134,3 +134,15 @@ TEST_CASE("continues_on carries move-only values") {
         lexec::sync_wait(lexec::just(std::make_unique<int>(3)) | lexec::continues_on(lexec::inline_scheduler{}));
     CHECK(*std::get<0>(*result) == 3);
 }
+
+TEST_CASE("continues_on connects as a const lvalue, as a loop connects its child each iteration") {
+    auto other = lexec_test::loop_thread{};
+    auto const sndr = lexec::just(5) | lexec::continues_on(other.scheduler());
+    auto const result = lexec::sync_wait(sndr);
+    CHECK(std::get<0>(*result) == 5);
+
+    auto count = 0;
+    lexec::sync_wait(lexec::repeat_until(lexec::just() | lexec::continues_on(other.scheduler()) |
+                                         lexec::then([&count]() noexcept { return ++count == 3; })));
+    CHECK(count == 3);
+}

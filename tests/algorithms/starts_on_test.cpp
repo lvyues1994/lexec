@@ -48,6 +48,19 @@ TEST_CASE("on runs the sender on the scheduler and completes where it was starte
     CHECK(returned_here);
 }
 
+TEST_CASE("starts_on and on connect as const lvalues, as a loop connects its child each iteration") {
+    auto other = lexec_test::loop_thread{};
+    auto const started = lexec::starts_on(other.scheduler(), lexec::just(1));
+    CHECK(std::get<0>(*lexec::sync_wait(started)) == 1);
+    auto const there_and_back = lexec::on(other.scheduler(), lexec::just(2));
+    CHECK(std::get<0>(*lexec::sync_wait(there_and_back)) == 2);
+
+    auto count = 0;
+    lexec::sync_wait(lexec::repeat_until(lexec::on(other.scheduler(), lexec::just()) |
+                                         lexec::then([&count]() noexcept { return ++count == 3; })));
+    CHECK(count == 3);
+}
+
 TEST_CASE("on with a closure runs the closure on the scheduler and completes where the sender did") {
     auto other = lexec_test::loop_thread{};
     auto const result = lexec::sync_wait(
